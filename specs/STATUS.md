@@ -12,12 +12,17 @@ installation was present at initialization. This is a fresh-install implementati
   scoped masked learning, family caps, correction invalidation, structural coverage.
   Custom evaluation profiles, finding resolution and further visual fixture tests
   remain to be implemented.
-- M3: pending — SIWC registration, identity validation, streaming, budgets and jobs.
-  Official registration, account, inference and preview docs were retrieved for
-  revalidation on 2026-10-15; no live account test has been performed.
+- M3: implemented against a signed-token mock — PKCE/OIDC registration, account
+  switching and explicit offline binding, protected credentials, refresh/revocation,
+  model catalog, terminal SSE parsing, image consent, budgets and durable jobs.
+  Restart/cancel/account-switch do not resubmit or transfer work. Official
+  registration, account, inference and preview docs were revalidated on 2026-10-15.
+  Live SIWC callback, model admission and text/vision smoke tests remain unverified.
 - M4: offline compiler implemented — self-contained text prompts, reference roles,
   canonical hashes, no-redesign policy, export and manually mapped result import.
-  Provider planner and richer state-study recipe controls remain.
+  Provider reasoning returns strictly validated, unconfirmed observations, findings
+  and next actions. User review is required before adopting features. Richer
+  state-study recipe controls and planner prompt proposals remain.
 - M5: baseline handoff implemented — ZIP specification, reference permissions,
   coverage, findings, effective event provenance, acceptance checks and checkpoints.
   Reported build API exists; full prototype UI, migration tooling, and preference
@@ -25,9 +30,10 @@ installation was present at initialization. This is a fresh-install implementati
 
 ## Current verification
 
-- 29 Python tests pass: domain/service transactions, reference numerical behavior,
+- 37 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
-  authentication/CSRF/isolation/deletion.
+  authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
+  isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
 - One real Chromium end-to-end test passes through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap

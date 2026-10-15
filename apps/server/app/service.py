@@ -1,178 +1,468 @@
 """Offline domain services. Published evidence is append-only; every call is owner scoped."""
+
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 import numpy as np
-from .common import canonical, digest, uid, require, DomainError
-from .contracts import DesignInput, VersionInput, EvidenceReviewInput, ReviewInput, FeedbackInput, DepictionInput, LinkInput
+
+from .common import canonical, digest, require, uid
+from .contracts import (
+    DepictionInput,
+    DesignInput,
+    EvidenceReviewInput,
+    FeedbackInput,
+    LinkInput,
+    ReviewInput,
+    VersionInput,
+)
 from .learning.policy import qualify
-from .learning.reference import FEATURE_NAMES, fit_pairwise, family_weights
+from .learning.reference import FEATURE_NAMES, family_weights, fit_pairwise
+
 
 class Service:
     def __init__(self, database):
         self.database = database
 
-    def principal(self, principal_id, display_name='Offline profile'):
+    def principal(self, principal_id, display_name="Offline profile"):
         with self.database.connect() as db:
-            db.execute('INSERT OR IGNORE INTO principals VALUES (?,?)', (principal_id, display_name))
+            db.execute(
+                "INSERT OR IGNORE INTO principals VALUES (?,?)",
+                (principal_id, display_name),
+            )
 
     def owned(self, db, principal, project):
-        row = db.execute('SELECT * FROM projects WHERE project_id=? AND principal_id=?', (project, principal)).fetchone()
-        require(row is not None, 'Project not found', 404)
+        row = db.execute(
+            "SELECT * FROM projects WHERE project_id=? AND principal_id=?",
+            (project, principal),
+        ).fetchone()
+        require(row is not None, "Project not found", 404)
         return dict(row)
 
     def get(self, db, table, project, column, key):
         # Table and column come exclusively from service code, never request input.
-        row = db.execute(f'SELECT * FROM {table} WHERE project_id=? AND {column}=?', (project, key)).fetchone()
-        require(row is not None, 'Record not found', 404)
+        row = db.execute(
+            f"SELECT * FROM {table} WHERE project_id=? AND {column}=?", (project, key)
+        ).fetchone()
+        require(row is not None, "Record not found", 404)
         return dict(row)
 
     def sequence(self, project, expected):
-        require(project['event_sequence'] == expected, 'Project changed; reload before applying this action', 409)
+        require(
+            project["event_sequence"] == expected,
+            "Project changed; reload before applying this action",
+            409,
+        )
 
-    def append(self, db, project, branch, action, payload, domain='project', event_id=None, review=None, target=None, request_hash=None):
+    def append(
+        self,
+        db,
+        project,
+        branch,
+        action,
+        payload,
+        domain="project",
+        event_id=None,
+        review=None,
+        target=None,
+        request_hash=None,
+    ):
         event_id = event_id or uid()
-        sequence = db.execute('UPDATE projects SET event_sequence=event_sequence+1 WHERE project_id=? RETURNING event_sequence', (project,)).fetchone()[0]
-        db.execute('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                   (project, event_id, sequence, branch, review, domain, action, target, canonical(payload), request_hash or digest(payload), datetime.now(timezone.utc).isoformat()))
+        sequence = db.execute(
+            "UPDATE projects SET event_sequence=event_sequence+1 WHERE project_id=? RETURNING event_sequence",
+            (project,),
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                project,
+                event_id,
+                sequence,
+                branch,
+                review,
+                domain,
+                action,
+                target,
+                canonical(payload),
+                request_hash or digest(payload),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
         # Any newer decision conservatively invalidates previous handoff checkpoints.
-        db.execute("UPDATE checkpoints SET status='outdated' WHERE project_id=? AND status='current'", (project,))
-        return {'eventId': event_id, 'eventSequence': sequence, **payload}
+        db.execute(
+            "UPDATE checkpoints SET status='outdated' WHERE project_id=? AND status='current'",
+            (project,),
+        )
+        return {"eventId": event_id, "eventSequence": sequence, **payload}
 
     def projects(self, principal):
         with self.database.connect() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM projects WHERE principal_id=? ORDER BY rowid DESC', (principal,))]
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM projects WHERE principal_id=? ORDER BY rowid DESC",
+                    (principal,),
+                )
+            ]
 
     def create_project(self, principal, title):
         project = uid()
         with self.database.connect() as db:
-            db.execute('INSERT INTO projects(project_id,principal_id,title) VALUES (?,?,?)', (project, principal, title))
-            db.execute('INSERT INTO branches(project_id,branch_id) VALUES (?,?)', (project, 'main'))
-            profile = {'schemaVersion': '2.0', 'stage': 'shortlist', 'slots': [
-                {'id': 'front', 'view': 'front', 'framing': 'full_body', 'required': True},
-                {'id': 'left', 'view': 'character_left_profile', 'framing': 'full_body', 'required': True},
-                {'id': 'right', 'view': 'character_right_profile', 'framing': 'full_body', 'required': True},
-                {'id': 'back', 'view': 'back', 'framing': 'full_body', 'required': True},
-                {'id': 'detail', 'view': 'front', 'framing': 'detail', 'required': False}]}
-            db.execute('INSERT INTO evaluation_profiles VALUES (?,?,?)', (project, 'structure-v1', canonical(profile)))
+            db.execute(
+                "INSERT INTO projects(project_id,principal_id,title) VALUES (?,?,?)",
+                (project, principal, title),
+            )
+            db.execute(
+                "INSERT INTO branches(project_id,branch_id) VALUES (?,?)",
+                (project, "main"),
+            )
+            profile = {
+                "schemaVersion": "2.0",
+                "stage": "shortlist",
+                "slots": [
+                    {
+                        "id": "front",
+                        "view": "front",
+                        "framing": "full_body",
+                        "required": True,
+                    },
+                    {
+                        "id": "left",
+                        "view": "character_left_profile",
+                        "framing": "full_body",
+                        "required": True,
+                    },
+                    {
+                        "id": "right",
+                        "view": "character_right_profile",
+                        "framing": "full_body",
+                        "required": True,
+                    },
+                    {
+                        "id": "back",
+                        "view": "back",
+                        "framing": "full_body",
+                        "required": True,
+                    },
+                    {
+                        "id": "detail",
+                        "view": "front",
+                        "framing": "detail",
+                        "required": False,
+                    },
+                ],
+            }
+            db.execute(
+                "INSERT INTO evaluation_profiles VALUES (?,?,?)",
+                (project, "structure-v1", canonical(profile)),
+            )
             return self.owned(db, principal, project)
 
     def validate_sources(self, db, project, spec):
-        for prop in spec['properties'].values():
-            for event in prop['sourceEventIds']:
-                self.get(db, 'events', project, 'event_id', event)
-            for link in prop['sourceDepictionLinkIds']:
-                self.get(db, 'depiction_links', project, 'link_id', link)
+        for prop in spec["properties"].values():
+            for event in prop["sourceEventIds"]:
+                self.get(db, "events", project, "event_id", event)
+            for link in prop["sourceDepictionLinkIds"]:
+                self.get(db, "depiction_links", project, "link_id", link)
 
     def create_design(self, principal, project, data: DesignInput):
         with self.database.connect() as db:
             self.owned(db, principal, project)
-            self.get(db, 'branches', project, 'branch_id', data.branchId)
+            self.get(db, "branches", project, "branch_id", data.branchId)
             spec = data.spec.model_dump()
             self.validate_sources(db, project, spec)
             design, version = uid(), uid()
-            db.execute('INSERT INTO designs VALUES (?,?,?,?)', (project, design, data.branchId, data.title))
-            event = self.append(db, project, data.branchId, 'adopt_variant', {'versionId': version, 'spec': spec, 'reason': 'Initial design intent'}, 'design_intent')
-            db.execute('INSERT INTO design_versions VALUES (?,?,?,?,?,?,?,?)',
-                       (project, version, design, 1, None, digest(spec), canonical(spec), event['eventSequence']))
+            db.execute(
+                "INSERT INTO designs VALUES (?,?,?,?)",
+                (project, design, data.branchId, data.title),
+            )
+            event = self.append(
+                db,
+                project,
+                data.branchId,
+                "adopt_variant",
+                {"versionId": version, "spec": spec, "reason": "Initial design intent"},
+                "design_intent",
+            )
+            db.execute(
+                "INSERT INTO design_versions VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    project,
+                    version,
+                    design,
+                    1,
+                    None,
+                    digest(spec),
+                    canonical(spec),
+                    event["eventSequence"],
+                ),
+            )
             return self.version(db, project, version)
 
     def version(self, db, project, version):
-        row = self.get(db, 'design_versions', project, 'version_id', version)
-        row['spec'] = json.loads(row.pop('canonical_json'))
+        row = self.get(db, "design_versions", project, "version_id", version)
+        row["spec"] = json.loads(row.pop("canonical_json"))
         return row
 
     def new_version(self, principal, project, design, data: VersionInput):
         with self.database.connect() as db:
             state = self.owned(db, principal, project)
             self.sequence(state, data.expectedEventSequence)
-            lineage = self.get(db, 'designs', project, 'design_id', design)
+            lineage = self.get(db, "designs", project, "design_id", design)
             parent = self.version(db, project, data.parentVersionId)
-            require(parent['design_id'] == design, 'Parent belongs to another lineage')
+            require(parent["design_id"] == design, "Parent belongs to another lineage")
             spec = data.spec.model_dump()
             self.validate_sources(db, project, spec)
-            require(digest(spec) != parent['canonical_hash'], 'No design change: import a new depiction instead')
-            locks = self.reduce(db, project, lineage['branch_id'])['locks']
+            require(
+                digest(spec) != parent["canonical_hash"],
+                "No design change: import a new depiction instead",
+            )
+            locks = self.reduce(db, project, lineage["branch_id"])["locks"]
             for key in locks.get(data.parentVersionId, []):
-                require(spec['properties'].get(key) == parent['spec']['properties'].get(key), f'Unlock {key} explicitly before changing it', 409)
+                require(
+                    spec["properties"].get(key)
+                    == parent["spec"]["properties"].get(key),
+                    f"Unlock {key} explicitly before changing it",
+                    409,
+                )
             version = uid()
-            revision = db.execute('SELECT MAX(revision)+1 FROM design_versions WHERE project_id=? AND design_id=?', (project, design)).fetchone()[0]
-            changes = [key for key in set(spec['properties']) | set(parent['spec']['properties']) if spec['properties'].get(key) != parent['spec']['properties'].get(key)]
-            event = self.append(db, project, lineage['branch_id'], 'adopt_variant', {'versionId': version, 'parentVersionId': data.parentVersionId, 'changes': changes, 'reason': data.reason}, 'design_intent')
-            db.execute('INSERT INTO design_versions VALUES (?,?,?,?,?,?,?,?)', (project, version, design, revision, data.parentVersionId, digest(spec), canonical(spec), event['eventSequence']))
+            revision = db.execute(
+                "SELECT MAX(revision)+1 FROM design_versions WHERE project_id=? AND design_id=?",
+                (project, design),
+            ).fetchone()[0]
+            changes = [
+                key
+                for key in set(spec["properties"]) | set(parent["spec"]["properties"])
+                if spec["properties"].get(key) != parent["spec"]["properties"].get(key)
+            ]
+            event = self.append(
+                db,
+                project,
+                lineage["branch_id"],
+                "adopt_variant",
+                {
+                    "versionId": version,
+                    "parentVersionId": data.parentVersionId,
+                    "changes": changes,
+                    "reason": data.reason,
+                },
+                "design_intent",
+            )
+            db.execute(
+                "INSERT INTO design_versions VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    project,
+                    version,
+                    design,
+                    revision,
+                    data.parentVersionId,
+                    digest(spec),
+                    canonical(spec),
+                    event["eventSequence"],
+                ),
+            )
             return self.version(db, project, version)
 
     def designs(self, principal, project):
         with self.database.connect() as db:
             self.owned(db, principal, project)
             result = []
-            for row in db.execute('SELECT * FROM designs WHERE project_id=? ORDER BY rowid', (project,)):
+            for row in db.execute(
+                "SELECT * FROM designs WHERE project_id=? ORDER BY rowid", (project,)
+            ):
                 design = dict(row)
-                design['versions'] = [self.version(db, project, r[0]) for r in db.execute('SELECT version_id FROM design_versions WHERE project_id=? AND design_id=? ORDER BY revision DESC', (project, row['design_id']))]
+                design["versions"] = [
+                    self.version(db, project, r[0])
+                    for r in db.execute(
+                        "SELECT version_id FROM design_versions WHERE project_id=? AND design_id=? ORDER BY revision DESC",
+                        (project, row["design_id"]),
+                    )
+                ]
                 result.append(design)
             return result
 
     def create_depiction(self, principal, project, data: DepictionInput):
         with self.database.connect() as db:
             self.owned(db, principal, project)
-            self.get(db, 'assets', project, 'asset_id', data.assetId)
+            self.get(db, "assets", project, "asset_id", data.assetId)
             if data.originPlanId:
-                require(db.execute('SELECT 1 FROM prompt_plans WHERE project_id=? AND plan_id=? AND revision=?', (project, data.originPlanId, data.originPromptRevision)).fetchone(), 'Unknown prompt revision', 404)
+                require(
+                    db.execute(
+                        "SELECT 1 FROM prompt_plans WHERE project_id=? AND plan_id=? AND revision=?",
+                        (project, data.originPlanId, data.originPromptRevision),
+                    ).fetchone(),
+                    "Unknown prompt revision",
+                    404,
+                )
             if data.sourceBuildId:
-                self.get(db, 'model_builds', project, 'build_id', data.sourceBuildId)
+                self.get(db, "model_builds", project, "build_id", data.sourceBuildId)
             depiction = uid()
-            db.execute('INSERT INTO depictions VALUES (?,?,?,?,?,?,?,?)', (project, depiction, data.assetId, data.sourceKind, data.originPlanId, data.originPromptRevision, data.sourceBuildId, canonical({'caption': data.caption, 'exportPermission': data.exportPermission, 'explicitlyUnassociated': data.explicitlyUnassociated})))
-            return {'depictionId': depiction}
+            db.execute(
+                "INSERT INTO depictions VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    project,
+                    depiction,
+                    data.assetId,
+                    data.sourceKind,
+                    data.originPlanId,
+                    data.originPromptRevision,
+                    data.sourceBuildId,
+                    canonical(
+                        {
+                            "caption": data.caption,
+                            "exportPermission": data.exportPermission,
+                            "explicitlyUnassociated": data.explicitlyUnassociated,
+                        }
+                    ),
+                ),
+            )
+            return {"depictionId": depiction}
 
     def create_link(self, principal, project, data: LinkInput):
         with self.database.connect() as db:
             self.owned(db, principal, project)
-            depiction = self.get(db, 'depictions', project, 'depiction_id', data.depictionId)
+            depiction = self.get(
+                db, "depictions", project, "depiction_id", data.depictionId
+            )
             self.version(db, project, data.versionId)
-            if depiction['source_build_id']:
-                build = self.get(db, 'model_builds', project, 'build_id', depiction['source_build_id'])
-                require(build['target_version_id'] == data.versionId, 'Capture build targets another design version')
+            if depiction["source_build_id"]:
+                build = self.get(
+                    db,
+                    "model_builds",
+                    project,
+                    "build_id",
+                    depiction["source_build_id"],
+                )
+                require(
+                    build["target_version_id"] == data.versionId,
+                    "Capture build targets another design version",
+                )
             link = uid()
-            db.execute('INSERT INTO depiction_links VALUES (?,?,?,?,?,?,?)', (project, link, data.depictionId, data.versionId, 'unreviewed', canonical({'reviewedRegions': []}), None))
-            return {'linkId': link}
+            db.execute(
+                "INSERT INTO depiction_links VALUES (?,?,?,?,?,?,?)",
+                (
+                    project,
+                    link,
+                    data.depictionId,
+                    data.versionId,
+                    "unreviewed",
+                    canonical({"reviewedRegions": []}),
+                    None,
+                ),
+            )
+            return {"linkId": link}
 
     def evidence_review(self, principal, project, data: EvidenceReviewInput):
         with self.database.connect() as db:
             state = self.owned(db, principal, project)
             self.sequence(state, data.expectedEventSequence)
-            old = self.get(db, 'depiction_links', project, 'link_id', data.linkId)
-            require(not db.execute('SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?', (project, data.linkId)).fetchone(), 'Review has already been superseded', 409)
-            design = self.get(db, 'designs', project, 'design_id', self.version(db, project, old['version_id'])['design_id'])
+            old = self.get(db, "depiction_links", project, "link_id", data.linkId)
+            require(
+                not db.execute(
+                    "SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?",
+                    (project, data.linkId),
+                ).fetchone(),
+                "Review has already been superseded",
+                409,
+            )
+            design = self.get(
+                db,
+                "designs",
+                project,
+                "design_id",
+                self.version(db, project, old["version_id"])["design_id"],
+            )
             link = uid()
-            assessment = {'reviewedRegions': data.reviewedRegions, 'reviewer': 'user'}
-            db.execute('INSERT INTO depiction_links VALUES (?,?,?,?,?,?,?)', (project, link, old['depiction_id'], old['version_id'], data.status, canonical(assessment), old['link_id']))
+            assessment = {"reviewedRegions": data.reviewedRegions, "reviewer": "user"}
+            db.execute(
+                "INSERT INTO depiction_links VALUES (?,?,?,?,?,?,?)",
+                (
+                    project,
+                    link,
+                    old["depiction_id"],
+                    old["version_id"],
+                    data.status,
+                    canonical(assessment),
+                    old["link_id"],
+                ),
+            )
             for obs in data.observations:
-                db.execute('INSERT INTO observations VALUES (?,?,?,?,?,?,?)', (project, uid(), link, obs.region, 'design-features-v2', 'manual-v1', canonical(obs.model_dump())))
+                db.execute(
+                    "INSERT INTO observations VALUES (?,?,?,?,?,?,?)",
+                    (
+                        project,
+                        uid(),
+                        link,
+                        obs.region,
+                        "design-features-v2",
+                        "manual-v1",
+                        canonical(obs.model_dump()),
+                    ),
+                )
             for finding in data.findings:
-                if finding.kind == 'implementation_issue_reported':
-                    depiction = self.get(db, 'depictions', project, 'depiction_id', old['depiction_id'])
-                    require(depiction['source_build_id'], 'Implementation issues require a declared model build')
-                db.execute('INSERT INTO findings VALUES (?,?,?,?,?,?,?)', (project, uid(), old['version_id'], link, finding.kind, 'open', canonical(finding.model_dump())))
-            event = self.append(db, project, design['branch_id'], 'correct_evidence', {'oldLinkId': old['link_id'], 'newLinkId': link, 'status': data.status}, 'evidence_review')
-            return {'linkId': link, **event}
+                if finding.kind == "implementation_issue_reported":
+                    depiction = self.get(
+                        db, "depictions", project, "depiction_id", old["depiction_id"]
+                    )
+                    require(
+                        depiction["source_build_id"],
+                        "Implementation issues require a declared model build",
+                    )
+                db.execute(
+                    "INSERT INTO findings VALUES (?,?,?,?,?,?,?)",
+                    (
+                        project,
+                        uid(),
+                        old["version_id"],
+                        link,
+                        finding.kind,
+                        "open",
+                        canonical(finding.model_dump()),
+                    ),
+                )
+            event = self.append(
+                db,
+                project,
+                design["branch_id"],
+                "correct_evidence",
+                {"oldLinkId": old["link_id"], "newLinkId": link, "status": data.status},
+                "evidence_review",
+            )
+            return {"linkId": link, **event}
 
     def current_links(self, db, project, version):
-        rows = db.execute('''SELECT l.* FROM depiction_links l WHERE l.project_id=? AND l.version_id=?
-          AND NOT EXISTS (SELECT 1 FROM depiction_links newer WHERE newer.project_id=l.project_id AND newer.supersedes_link_id=l.link_id)''', (project, version))
+        rows = db.execute(
+            """SELECT l.* FROM depiction_links l WHERE l.project_id=? AND l.version_id=?
+          AND NOT EXISTS (SELECT 1 FROM depiction_links newer WHERE newer.project_id=l.project_id AND newer.supersedes_link_id=l.link_id)""",
+            (project, version),
+        )
         return [dict(r) for r in rows]
 
     def link_observations(self, db, project, link, region):
-        if link['status'] not in ('compatible', 'partial'):
+        if link["status"] not in ("compatible", "partial"):
             return []
-        approved = json.loads(link['assessment_json'])['reviewedRegions']
-        findings = [json.loads(r[0]) for r in db.execute("SELECT details_json FROM findings WHERE project_id=? AND link_id=? AND state='open'", (project, link['link_id']))]
+        approved = json.loads(link["assessment_json"])["reviewedRegions"]
+        findings = [
+            json.loads(r[0])
+            for r in db.execute(
+                "SELECT details_json FROM findings WHERE project_id=? AND link_id=? AND state='open'",
+                (project, link["link_id"]),
+            )
+        ]
         result = []
-        for row in db.execute('SELECT observed_json FROM observations WHERE project_id=? AND link_id=?', (project, link['link_id'])):
+        for row in db.execute(
+            "SELECT observed_json FROM observations WHERE project_id=? AND link_id=?",
+            (project, link["link_id"]),
+        ):
             obs = json.loads(row[0])
-            if obs['region'] not in approved and 'whole' not in approved:
+            if obs["region"] not in approved and "whole" not in approved:
                 continue
-            if region != 'whole' and obs['region'] not in (region, 'whole'):
+            if region != "whole" and obs["region"] not in (region, "whole"):
                 continue
-            if any(f['severity'] == 'blocking' and f['region'] in ('whole', obs['region'], region) for f in findings):
+            if any(
+                f["severity"] == "blocking"
+                and f["region"] in ("whole", obs["region"], region)
+                for f in findings
+            ):
                 continue
             result.append(obs)
         return result
@@ -182,198 +472,464 @@ class Service:
             self.owned(db, principal, project)
             spec = self.version(db, project, version)
             links = self.current_links(db, project, version)
-            profile = json.loads(self.get(db, 'evaluation_profiles', project, 'profile_id', 'structure-v1')['profile_json'])
+            profile = json.loads(
+                self.get(
+                    db, "evaluation_profiles", project, "profile_id", "structure-v1"
+                )["profile_json"]
+            )
             # Until a morphology-specific profile is configured, no humanoid assumptions.
-            slots = profile['slots'] if spec['spec']['morphology'] == 'humanoid' else []
+            slots = profile["slots"] if spec["spec"]["morphology"] == "humanoid" else []
             coverage = []
             for slot in slots:
-                status, matching = 'missing', []
+                status, matching = "missing", []
                 for link in links:
-                    if 'whole' not in json.loads(link['assessment_json'])['reviewedRegions']:
+                    if (
+                        "whole"
+                        not in json.loads(link["assessment_json"])["reviewedRegions"]
+                    ):
                         continue
-                    for obs in self.link_observations(db, project, link, 'whole'):
-                        p = obs['observedPresentation']
-                        if p['view'] == slot['view'] and p['framing'] == slot['framing'] and p['poseId'] == 'neutral' and p['expressionId'] == 'neutral':
-                            depiction = self.get(db, 'depictions', project, 'depiction_id', link['depiction_id'])
-                            matching.append(link['link_id'])
-                            if depiction['source_build_id']:
-                                status = 'user_reported_model_evidence'
-                            elif status != 'user_reported_model_evidence':
-                                status = 'usable_concept_evidence'
-                coverage.append({**slot, 'status': status, 'linkIds': sorted(set(matching))})
-            required = [s for s in coverage if s['required']]
+                    for obs in self.link_observations(db, project, link, "whole"):
+                        p = obs["observedPresentation"]
+                        if (
+                            p["view"] == slot["view"]
+                            and p["framing"] == slot["framing"]
+                            and p["poseId"] == "neutral"
+                            and p["expressionId"] == "neutral"
+                        ):
+                            depiction = self.get(
+                                db,
+                                "depictions",
+                                project,
+                                "depiction_id",
+                                link["depiction_id"],
+                            )
+                            matching.append(link["link_id"])
+                            if depiction["source_build_id"]:
+                                status = "user_reported_model_evidence"
+                            elif status != "user_reported_model_evidence":
+                                status = "usable_concept_evidence"
+                coverage.append(
+                    {**slot, "status": status, "linkIds": sorted(set(matching))}
+                )
+            required = [s for s in coverage if s["required"]]
             for link in links:
-                link['depiction'] = self.get(db, 'depictions', project, 'depiction_id', link['depiction_id'])
-                link['assessment'] = json.loads(link.pop('assessment_json'))
-                link['observations'] = [json.loads(r[0]) for r in db.execute('SELECT observed_json FROM observations WHERE project_id=? AND link_id=?', (project, link['link_id']))]
-            findings = [dict(r) for r in db.execute('SELECT * FROM findings WHERE project_id=? AND version_id=?', (project, version))]
-            return {'version': spec, 'links': links, 'slots': coverage, 'referenceCoverage': sum(s['status'] != 'missing' for s in required) / len(required) if required else None,
-                    'coverageMeaning': 'Reference completeness only; geometry and rigging remain unverified', 'findings': findings}
+                link["depiction"] = self.get(
+                    db, "depictions", project, "depiction_id", link["depiction_id"]
+                )
+                link["assessment"] = json.loads(link.pop("assessment_json"))
+                link["observations"] = [
+                    json.loads(r[0])
+                    for r in db.execute(
+                        "SELECT observed_json FROM observations WHERE project_id=? AND link_id=?",
+                        (project, link["link_id"]),
+                    )
+                ]
+            findings = [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM findings WHERE project_id=? AND version_id=?",
+                    (project, version),
+                )
+            ]
+            return {
+                "version": spec,
+                "links": links,
+                "slots": coverage,
+                "referenceCoverage": sum(s["status"] != "missing" for s in required)
+                / len(required)
+                if required
+                else None,
+                "coverageMeaning": "Reference completeness only; geometry and rigging remain unverified",
+                "findings": findings,
+            }
 
     def freeze_bundle(self, db, project, version, link_ids, region, sequence):
         self.version(db, project, version)
-        require(len(link_ids) == len(set(link_ids)), 'Duplicate link in comparison')
+        require(len(link_ids) == len(set(link_ids)), "Duplicate link in comparison")
         frozen, observations = [], []
-        current = {l['link_id']: l for l in self.current_links(db, project, version)}
+        current = {l["link_id"]: l for l in self.current_links(db, project, version)}
         for link_id in link_ids:
-            require(link_id in current, 'Evidence is superseded or belongs to another design version', 409)
+            require(
+                link_id in current,
+                "Evidence is superseded or belongs to another design version",
+                409,
+            )
             link = current[link_id]
             obs = self.link_observations(db, project, link, region)
-            depiction = self.get(db, 'depictions', project, 'depiction_id', link['depiction_id'])
-            frozen.append({'link': link, 'depiction': depiction, 'observations': obs})
+            depiction = self.get(
+                db, "depictions", project, "depiction_id", link["depiction_id"]
+            )
+            frozen.append({"link": link, "depiction": depiction, "observations": obs})
             observations.extend(obs)
-        payload = {'versionId': version, 'region': region, 'items': frozen}
+        payload = {"versionId": version, "region": region, "items": frozen}
         bundle = uid()
-        db.execute('INSERT INTO evidence_bundles VALUES (?,?,?,?,?,?,?)', (project, bundle, version, 'structure-v1', sequence, digest(payload), canonical(payload)))
+        db.execute(
+            "INSERT INTO evidence_bundles VALUES (?,?,?,?,?,?,?)",
+            (
+                project,
+                bundle,
+                version,
+                "structure-v1",
+                sequence,
+                digest(payload),
+                canonical(payload),
+            ),
+        )
         for ordinal, link_id in enumerate(link_ids):
-            db.execute('INSERT INTO bundle_items VALUES (?,?,?,?,?,?)', (project, bundle, version, link_id, ordinal, canonical([region])))
+            db.execute(
+                "INSERT INTO bundle_items VALUES (?,?,?,?,?,?)",
+                (project, bundle, version, link_id, ordinal, canonical([region])),
+            )
         return bundle, observations
 
     def review(self, principal, project, data: ReviewInput):
         with self.database.connect() as db:
             state = self.owned(db, principal, project)
             self.sequence(state, data.expectedEventSequence)
-            require(data.versionA != data.versionB, 'A design cannot be compared against itself')
-            require(data.domain == 'visual_design' or not (data.linkIdsA or data.linkIdsB), 'Written intent reviews must not claim visual exposure')
-            branch = self.get(db, 'branches', project, 'branch_id', data.branchId)
+            require(
+                data.versionA != data.versionB,
+                "A design cannot be compared against itself",
+            )
+            require(
+                data.domain == "visual_design" or not (data.linkIdsA or data.linkIdsB),
+                "Written intent reviews must not claim visual exposure",
+            )
+            branch = self.get(db, "branches", project, "branch_id", data.branchId)
             for version in (data.versionA, data.versionB):
                 v = self.version(db, project, version)
-                design = self.get(db, 'designs', project, 'design_id', v['design_id'])
-                require(self.visible_in_branch(db, project, branch, design['branch_id'], v['created_sequence']), 'Version is outside this branch history')
-            ba, oa = self.freeze_bundle(db, project, data.versionA, data.linkIdsA, data.region, state['event_sequence'])
-            bb, ob = self.freeze_bundle(db, project, data.versionB, data.linkIdsB, data.region, state['event_sequence'])
-            qualification = {**qualify(oa, ob, data.region, data.domain), 'domain': data.domain}
+                design = self.get(db, "designs", project, "design_id", v["design_id"])
+                require(
+                    self.visible_in_branch(
+                        db, project, branch, design["branch_id"], v["created_sequence"]
+                    ),
+                    "Version is outside this branch history",
+                )
+            ba, oa = self.freeze_bundle(
+                db,
+                project,
+                data.versionA,
+                data.linkIdsA,
+                data.region,
+                state["event_sequence"],
+            )
+            bb, ob = self.freeze_bundle(
+                db,
+                project,
+                data.versionB,
+                data.linkIdsB,
+                data.region,
+                state["event_sequence"],
+            )
+            qualification = {
+                **qualify(oa, ob, data.region, data.domain),
+                "domain": data.domain,
+            }
             review = uid()
-            db.execute('INSERT INTO review_sessions VALUES (?,?,?,?,?,?)', (project, review, data.branchId, data.region, state['event_sequence'], canonical(qualification)))
-            for side, version, bundle in [('A', data.versionA, ba), ('B', data.versionB, bb)]:
-                db.execute('INSERT INTO review_items VALUES (?,?,?,?,?)', (project, review, side, version, bundle))
-            return {'reviewSessionId': review, 'qualification': qualification, 'bundles': {'A': ba, 'B': bb}, 'eventSequence': state['event_sequence']}
+            db.execute(
+                "INSERT INTO review_sessions VALUES (?,?,?,?,?,?)",
+                (
+                    project,
+                    review,
+                    data.branchId,
+                    data.region,
+                    state["event_sequence"],
+                    canonical(qualification),
+                ),
+            )
+            for side, version, bundle in [
+                ("A", data.versionA, ba),
+                ("B", data.versionB, bb),
+            ]:
+                db.execute(
+                    "INSERT INTO review_items VALUES (?,?,?,?,?)",
+                    (project, review, side, version, bundle),
+                )
+            return {
+                "reviewSessionId": review,
+                "qualification": qualification,
+                "bundles": {"A": ba, "B": bb},
+                "eventSequence": state["event_sequence"],
+            }
 
     def visible_in_branch(self, db, project, branch, source_branch, sequence):
-        if branch['branch_id'] == source_branch:
+        if branch["branch_id"] == source_branch:
             return True
-        if branch['parent_branch_id'] is None or sequence > branch['parent_sequence']:
+        if branch["parent_branch_id"] is None or sequence > branch["parent_sequence"]:
             return False
-        parent = self.get(db, 'branches', project, 'branch_id', branch['parent_branch_id'])
+        parent = self.get(
+            db, "branches", project, "branch_id", branch["parent_branch_id"]
+        )
         return self.visible_in_branch(db, project, parent, source_branch, sequence)
 
     def history(self, db, project, branch_id, through=None):
-        branch = self.get(db, 'branches', project, 'branch_id', branch_id)
-        inherited = self.history(db, project, branch['parent_branch_id'], branch['parent_sequence']) if branch['parent_branch_id'] else []
-        local = [dict(r) for r in db.execute('SELECT * FROM events WHERE project_id=? AND branch_id=? AND sequence<=? ORDER BY sequence', (project, branch_id, through if through is not None else 2**62))]
+        branch = self.get(db, "branches", project, "branch_id", branch_id)
+        inherited = (
+            self.history(
+                db, project, branch["parent_branch_id"], branch["parent_sequence"]
+            )
+            if branch["parent_branch_id"]
+            else []
+        )
+        local = [
+            dict(r)
+            for r in db.execute(
+                "SELECT * FROM events WHERE project_id=? AND branch_id=? AND sequence<=? ORDER BY sequence",
+                (project, branch_id, through if through is not None else 2**62),
+            )
+        ]
         return inherited + local
 
     def reduce(self, db, project, branch_id):
         history = self.history(db, project, branch_id)
-        undone = {e['target_event_id'] for e in history if e['action'] == 'undo'}
-        active = [e for e in history if e['event_id'] not in undone and e['action'] != 'undo']
+        undone = {e["target_event_id"] for e in history if e["action"] == "undo"}
+        active = [
+            e for e in history if e["event_id"] not in undone and e["action"] != "undo"
+        ]
         shortlist, rejected, locks, epoch, comparisons = set(), set(), {}, 0, []
         for e in active:
-            p = json.loads(e['payload_json'])
-            action = e['action']
-            subjects = p.get('subjectVersionIds', [])
+            p = json.loads(e["payload_json"])
+            action = e["action"]
+            subjects = p.get("subjectVersionIds", [])
             v = subjects[0] if subjects else None
-            if action == 'shortlist_add':
+            if action == "shortlist_add":
                 shortlist.add(v)
                 rejected.discard(v)
-            elif action in ('shortlist_remove', 'reject_design'):
+            elif action in ("shortlist_remove", "reject_design"):
                 shortlist.discard(v)
-                if action == 'reject_design':
+                if action == "reject_design":
                     rejected.add(v)
-            elif action == 'lock_property':
-                locks.setdefault(v, set()).add(p['propertyKey'])
-            elif action == 'unlock_property':
-                locks.setdefault(v, set()).discard(p['propertyKey'])
-            elif action == 'reset':
+            elif action == "lock_property":
+                locks.setdefault(v, set()).add(p["propertyKey"])
+            elif action == "unlock_property":
+                locks.setdefault(v, set()).discard(p["propertyKey"])
+            elif action == "reset":
                 epoch += 1
                 comparisons = []
-                if not p['preserveLocks']:
+                if not p["preserveLocks"]:
                     locks = {}
-            elif action == 'compare':
+            elif action == "compare":
                 comparisons.append(e)
-        return {'shortlist': sorted(shortlist), 'rejected': sorted(rejected), 'locks': {v: sorted(keys) for v, keys in locks.items()}, 'epoch': epoch, 'comparisons': comparisons, 'activeEventIds': [e['event_id'] for e in active]}
+        return {
+            "shortlist": sorted(shortlist),
+            "rejected": sorted(rejected),
+            "locks": {v: sorted(keys) for v, keys in locks.items()},
+            "epoch": epoch,
+            "comparisons": comparisons,
+            "activeEventIds": [e["event_id"] for e in active],
+        }
 
     def feedback(self, principal, project, data: FeedbackInput):
         with self.database.connect() as db:
             state = self.owned(db, principal, project)
             request = data.model_dump()
-            old = db.execute('SELECT * FROM events WHERE project_id=? AND event_id=?', (project, data.eventId)).fetchone()
+            old = db.execute(
+                "SELECT * FROM events WHERE project_id=? AND event_id=?",
+                (project, data.eventId),
+            ).fetchone()
             if old:
-                require(old['request_hash'] == digest(request), 'Event ID reused with a different request', 409)
-                return {'eventId': old['event_id'], 'eventSequence': old['sequence'], **json.loads(old['payload_json'])}
+                require(
+                    old["request_hash"] == digest(request),
+                    "Event ID reused with a different request",
+                    409,
+                )
+                return {
+                    "eventId": old["event_id"],
+                    "eventSequence": old["sequence"],
+                    **json.loads(old["payload_json"]),
+                }
             self.sequence(state, data.expectedEventSequence)
-            branch = self.get(db, 'branches', project, 'branch_id', data.branchId)
+            branch = self.get(db, "branches", project, "branch_id", data.branchId)
             payload = dict(request)
-            if data.action == 'compare':
-                review = self.get(db, 'review_sessions', project, 'review_id', data.reviewSessionId)
-                require(review['branch_id'] == data.branchId, 'Review belongs to another branch')
-                require(review['region'] == data.region, 'Review region does not match feedback')
-                require(review['input_sequence'] == state['event_sequence'], 'Review is stale; reopen the comparison', 409)
-                q = json.loads(review['qualification_json'])
-                require(data.domain == q['domain'], 'Feedback domain differs from sealed review')
-                sides = list(db.execute('SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side', (project, data.reviewSessionId)))
-                require(len(sides) == 2, 'Review is not complete')
-                payload['subjectVersionIds'] = [s['version_id'] for s in sides]
-                payload['trainingStatus'] = 'qualified' if q['eligible'] and data.outcome in ('A', 'B', 'tie') else 'provisional_not_trained'
+            if data.action == "compare":
+                review = self.get(
+                    db, "review_sessions", project, "review_id", data.reviewSessionId
+                )
+                require(
+                    review["branch_id"] == data.branchId,
+                    "Review belongs to another branch",
+                )
+                require(
+                    review["region"] == data.region,
+                    "Review region does not match feedback",
+                )
+                require(
+                    review["input_sequence"] == state["event_sequence"],
+                    "Review is stale; reopen the comparison",
+                    409,
+                )
+                q = json.loads(review["qualification_json"])
+                require(
+                    data.domain == q["domain"],
+                    "Feedback domain differs from sealed review",
+                )
+                sides = list(
+                    db.execute(
+                        "SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side",
+                        (project, data.reviewSessionId),
+                    )
+                )
+                require(len(sides) == 2, "Review is not complete")
+                payload["subjectVersionIds"] = [s["version_id"] for s in sides]
+                payload["trainingStatus"] = (
+                    "qualified"
+                    if q["eligible"] and data.outcome in ("A", "B", "tie")
+                    else "provisional_not_trained"
+                )
             else:
-                require(data.domain == 'project', 'This action belongs in the project domain')
+                require(
+                    data.domain == "project",
+                    "This action belongs in the project domain",
+                )
                 for version in data.subjectVersionIds:
                     v = self.version(db, project, version)
-                    design = self.get(db, 'designs', project, 'design_id', v['design_id'])
-                    require(self.visible_in_branch(db, project, branch, design['branch_id'], v['created_sequence']), 'Version is outside branch history')
-                if data.action in ('lock_property', 'unlock_property'):
-                    prop = self.version(db, project, data.subjectVersionIds[0])['spec']['properties'].get(data.propertyKey)
-                    require(prop is not None and prop['value'] is not None, 'Cannot preserve an undefined property')
-                if data.action == 'undo':
+                    design = self.get(
+                        db, "designs", project, "design_id", v["design_id"]
+                    )
+                    require(
+                        self.visible_in_branch(
+                            db,
+                            project,
+                            branch,
+                            design["branch_id"],
+                            v["created_sequence"],
+                        ),
+                        "Version is outside branch history",
+                    )
+                if data.action in ("lock_property", "unlock_property"):
+                    prop = self.version(db, project, data.subjectVersionIds[0])["spec"][
+                        "properties"
+                    ].get(data.propertyKey)
+                    require(
+                        prop is not None and prop["value"] is not None,
+                        "Cannot preserve an undefined property",
+                    )
+                if data.action == "undo":
                     history = self.history(db, project, data.branchId)
-                    target = next((e for e in history if e['event_id'] == data.targetEventId), None)
-                    require(target is not None, 'Target event is not in branch history', 404)
-                    require(target['action'] in ('compare', 'shortlist_add', 'shortlist_remove', 'reject_design', 'lock_property', 'unlock_property', 'reset'), 'This record cannot be undone')
-                    require(not any(e['action'] == 'undo' and e['target_event_id'] == data.targetEventId for e in history), 'Event already undone', 409)
-                if data.action == 'fork_branch':
+                    target = next(
+                        (e for e in history if e["event_id"] == data.targetEventId),
+                        None,
+                    )
+                    require(
+                        target is not None, "Target event is not in branch history", 404
+                    )
+                    require(
+                        target["action"]
+                        in (
+                            "compare",
+                            "shortlist_add",
+                            "shortlist_remove",
+                            "reject_design",
+                            "lock_property",
+                            "unlock_property",
+                            "reset",
+                        ),
+                        "This record cannot be undone",
+                    )
+                    require(
+                        not any(
+                            e["action"] == "undo"
+                            and e["target_event_id"] == data.targetEventId
+                            for e in history
+                        ),
+                        "Event already undone",
+                        409,
+                    )
+                if data.action == "fork_branch":
                     child = uid()
-                    db.execute('INSERT INTO branches(project_id,branch_id,parent_branch_id,parent_sequence) VALUES (?,?,?,?)', (project, child, data.branchId, state['event_sequence']))
-                    payload['childBranchId'] = child
-            return self.append(db, project, data.branchId, data.action, payload, data.domain, data.eventId, data.reviewSessionId, data.targetEventId, digest(request))
+                    db.execute(
+                        "INSERT INTO branches(project_id,branch_id,parent_branch_id,parent_sequence) VALUES (?,?,?,?)",
+                        (project, child, data.branchId, state["event_sequence"]),
+                    )
+                    payload["childBranchId"] = child
+            return self.append(
+                db,
+                project,
+                data.branchId,
+                data.action,
+                payload,
+                data.domain,
+                data.eventId,
+                data.reviewSessionId,
+                data.targetEventId,
+                digest(request),
+            )
 
-    def preferences(self, principal, project, branch_id='main'):
+    def preferences(self, principal, project, branch_id="main"):
         with self.database.connect() as db:
             self.owned(db, principal, project)
             state = self.reduce(db, project, branch_id)
             rows = []
-            for event in state.pop('comparisons'):
-                payload = json.loads(event['payload_json'])
-                if payload['outcome'] not in ('A', 'B', 'tie'):
+            for event in state.pop("comparisons"):
+                payload = json.loads(event["payload_json"])
+                if payload["outcome"] not in ("A", "B", "tie"):
                     continue
-                review = self.get(db, 'review_sessions', project, 'review_id', event['review_id'])
-                q = json.loads(review['qualification_json'])
-                if not q['eligible']:
+                review = self.get(
+                    db, "review_sessions", project, "review_id", event["review_id"]
+                )
+                q = json.loads(review["qualification_json"])
+                if not q["eligible"]:
                     continue
-                sides = list(db.execute('SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side', (project, event['review_id'])))
+                sides = list(
+                    db.execute(
+                        "SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side",
+                        (project, event["review_id"]),
+                    )
+                )
                 invalidated = False
                 for side in sides:
-                    bundle = self.get(db, 'evidence_bundles', project, 'bundle_id', side['bundle_id'])
-                    for item in json.loads(bundle['frozen_json'])['items']:
+                    bundle = self.get(
+                        db, "evidence_bundles", project, "bundle_id", side["bundle_id"]
+                    )
+                    for item in json.loads(bundle["frozen_json"])["items"]:
                         # A later correction never rewrites exposure. Conservatively retire that row.
-                        if db.execute('SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?', (project, item['link']['link_id'])).fetchone():
+                        if db.execute(
+                            "SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?",
+                            (project, item["link"]["link_id"]),
+                        ).fetchone():
                             invalidated = True
                 if invalidated:
                     continue
                 # Canonical orientation makes A/B reversal share one family and consistent vectors.
-                versions = [s['version_id'] for s in sides]
-                delta = np.array(q['difference'])
-                target = {'A': 1., 'B': 0., 'tie': .5}[payload['outcome']]
+                versions = [s["version_id"] for s in sides]
+                delta = np.array(q["difference"])
+                target = {"A": 1.0, "B": 0.0, "tie": 0.5}[payload["outcome"]]
                 if versions[0] > versions[1]:
                     delta, target = -delta, 1 - target
-                rows.append({'region': review['region'], 'delta': delta, 'target': target,
-                             'weight': .5 if payload['outcome'] == 'tie' else 1.,
-                             'family': canonical([sorted(versions), state['epoch'], review['region']]), 'eventId': event['event_id']})
+                rows.append(
+                    {
+                        "region": review["region"],
+                        "delta": delta,
+                        "target": target,
+                        "weight": 0.5 if payload["outcome"] == "tie" else 1.0,
+                        "family": canonical(
+                            [sorted(versions), state["epoch"], review["region"]]
+                        ),
+                        "eventId": event["event_id"],
+                    }
+                )
             models = {}
-            for region in sorted(set(r['region'] for r in rows)):
-                group = [r for r in rows if r['region'] == region]
-                weights = family_weights([r['family'] for r in group], np.array([r['weight'] for r in group]))
-                model = fit_pairwise(np.array([r['delta'] for r in group]), np.array([r['target'] for r in group]), weights)
-                models[region] = {'state': 'fitted' if model.converged else 'insufficient_evidence', 'coefficients': model.coefficients.tolist() if model.converged else None,
-                                  'effectiveWeight': model.effective_weight, 'eventIds': [r['eventId'] for r in group], 'featureNames': list(FEATURE_NAMES)}
-            return {**state, 'models': models, 'state': 'fitted' if models else 'insufficient_evidence',
-                    'limitations': 'Region models are separate. No universal ranking without a common observed feature basis. Numerical convergence is not preference certainty.'}
+            for region in sorted({r["region"] for r in rows}):
+                group = [r for r in rows if r["region"] == region]
+                weights = family_weights(
+                    [r["family"] for r in group], np.array([r["weight"] for r in group])
+                )
+                model = fit_pairwise(
+                    np.array([r["delta"] for r in group]),
+                    np.array([r["target"] for r in group]),
+                    weights,
+                )
+                models[region] = {
+                    "state": "fitted" if model.converged else "insufficient_evidence",
+                    "coefficients": model.coefficients.tolist()
+                    if model.converged
+                    else None,
+                    "effectiveWeight": model.effective_weight,
+                    "eventIds": [r["eventId"] for r in group],
+                    "featureNames": list(FEATURE_NAMES),
+                }
+            return {
+                **state,
+                "models": models,
+                "state": "fitted" if models else "insufficient_evidence",
+                "limitations": "Region models are separate. No universal ranking without a common observed feature basis. Numerical convergence is not preference certainty.",
+            }

@@ -2,8 +2,14 @@
 name = "avatar-style-explorer"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn", "pydantic", "numpy", "pillow", "httpx"]
+dependencies = ["fastapi", "uvicorn", "pydantic", "numpy", "pillow", "httpx", "PyJWT[crypto]"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
 
 [tool.pytest.ini_options]
 pythonpath = ["apps/server"]
 testpaths = ["apps/server/tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"apps/server/app/learning/reference.py" = ["TRY004"]

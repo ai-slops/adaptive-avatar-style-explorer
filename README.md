@@ -37,7 +37,10 @@ to the launcher as needed. The default `.data/` directory is ignored by Git.
 The current offline workflow supports project/design creation, original raster
 imports, manual evidence assessments and feature entry, frozen scoped comparisons,
 shortlists and property locks, immutable revisions, text prompt export/manual result
-import, checkpoints, and ZIP handoffs. Provider connection is still in progress.
+import, checkpoints, and ZIP handoffs. Account & privacy connects an individual SIWC registration. Set a local request
+budget, load the admitted model catalog, and explicitly consent before sending
+selected images. Model observations remain suggestions until you review them.
+Live SIWC behavior is not yet verified; automated tests use a signed-token mock.
 
 For browser tests, install Chromium with `npx playwright install chromium` in
 `apps/web`, then run `npm test --prefix apps/web`. Linux may need Playwright's

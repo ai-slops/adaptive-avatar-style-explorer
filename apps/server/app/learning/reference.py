@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 import numpy as np
 
 
@@ -63,7 +64,7 @@ def fit_pairwise(
         current_loss = objective(w)
         decrease = float(gradient @ step)
         rate = 1.0
-        while rate >= 2.0 ** -20:
+        while rate >= 2.0**-20:
             trial = w - rate * step
             if objective(trial) <= current_loss - 1e-4 * rate * decrease:
                 w = trial
@@ -81,7 +82,9 @@ def fit_pairwise(
     )
 
 
-def comparison_prediction(model: PairwiseFit, difference: np.ndarray) -> tuple[float, float]:
+def comparison_prediction(
+    model: PairwiseFit, difference: np.ndarray
+) -> tuple[float, float]:
     """Return relative A-over-B probability and the stated acquisition heuristic."""
     d = np.asarray(difference, dtype=np.float64)
     if d.shape != model.coefficients.shape or not np.isfinite(d).all():
@@ -110,13 +113,41 @@ NUMERIC = {
 }
 CATEGORIES = {
     "form.stylization": (
-        "anime_proportioned", "cartoon_proportioned", "naturalistic",
-        "chibi", "geometric", "hybrid", "other",
+        "anime_proportioned",
+        "cartoon_proportioned",
+        "naturalistic",
+        "chibi",
+        "geometric",
+        "hybrid",
+        "other",
     ),
-    "hair.length": ("bald", "very_short", "short", "medium", "long", "very_long", "other"),
-    "hair.structure": ("straight", "wavy", "curly", "coiled", "spiky", "mixed", "other"),
+    "hair.length": (
+        "bald",
+        "very_short",
+        "short",
+        "medium",
+        "long",
+        "very_long",
+        "other",
+    ),
+    "hair.structure": (
+        "straight",
+        "wavy",
+        "curly",
+        "coiled",
+        "spiky",
+        "mixed",
+        "other",
+    ),
     "outfit.structure": (
-        "casual", "formal", "uniform", "fantasy", "techwear", "historical", "minimal", "other",
+        "casual",
+        "formal",
+        "uniform",
+        "fantasy",
+        "techwear",
+        "historical",
+        "minimal",
+        "other",
     ),
 }
 FEATURE_NAMES = tuple(NUMERIC) + tuple(
@@ -124,7 +155,9 @@ FEATURE_NAMES = tuple(NUMERIC) + tuple(
 )
 
 
-def encode_observed(attributes: dict, min_confidence: float = 0.6) -> tuple[np.ndarray, np.ndarray]:
+def encode_observed(
+    attributes: dict, min_confidence: float = 0.6
+) -> tuple[np.ndarray, np.ndarray]:
     """Encode reviewed visual observations, not canonical intentions or render settings.
 
     Each attribute is {value, confidence, visibility}. Missing/occluded entries
@@ -146,10 +179,21 @@ def encode_observed(attributes: dict, min_confidence: float = 0.6) -> tuple[np.n
         if row is None:
             offset += width
             continue
-        if not isinstance(row, dict) or set(row) != {"value", "confidence", "visibility"}:
-            raise ValueError("Use exactly value, confidence, and visibility per attribute.")
+        if not isinstance(row, dict) or set(row) != {
+            "value",
+            "confidence",
+            "visibility",
+        }:
+            raise ValueError(
+                "Use exactly value, confidence, and visibility per attribute."
+            )
         c, vis, value = row["confidence"], row["visibility"], row["value"]
-        if isinstance(c, bool) or not isinstance(c, (int, float)) or not np.isfinite(c) or not 0 <= c <= 1:
+        if (
+            isinstance(c, bool)
+            or not isinstance(c, (int, float))
+            or not np.isfinite(c)
+            or not 0 <= c <= 1
+        ):
             raise ValueError("Invalid extraction confidence.")
         if vis not in ("visible", "occluded", "out_of_frame", "unknown"):
             raise ValueError("Invalid visibility.")
@@ -168,14 +212,16 @@ def encode_observed(attributes: dict, min_confidence: float = 0.6) -> tuple[np.n
                 x[offset] = 2 * (value - lo) / (hi - lo) - 1
             else:
                 x[offset + CATEGORIES[key].index(value)] = 1
-            mask[offset:offset + width] = True
+            mask[offset : offset + width] = True
         offset += width
     return x, mask
 
 
-def masked_difference(left: tuple[np.ndarray, np.ndarray],
-                      right: tuple[np.ndarray, np.ndarray],
-                      scope: np.ndarray | None = None) -> np.ndarray:
+def masked_difference(
+    left: tuple[np.ndarray, np.ndarray],
+    right: tuple[np.ndarray, np.ndarray],
+    scope: np.ndarray | None = None,
+) -> np.ndarray:
     """Use only jointly visible, reliable features within the qualified scope."""
     xa, ma = left
     xb, mb = right
@@ -195,18 +241,26 @@ def masked_difference(left: tuple[np.ndarray, np.ndarray],
 def family_weights(families: list[str], base_weights: np.ndarray) -> np.ndarray:
     """Cap correlated evidence at total weight 1 per server-derived family."""
     base = np.asarray(base_weights, dtype=np.float64)
-    if base.shape != (len(families),) or not np.isfinite(base).all() or np.any(base < 0):
+    if (
+        base.shape != (len(families),)
+        or not np.isfinite(base).all()
+        or np.any(base < 0)
+    ):
         raise ValueError("Invalid family weights.")
     if any(not isinstance(f, str) or not f for f in families):
         raise ValueError("Each row requires a nonempty server-derived family.")
     totals: dict[str, float] = {}
     for family, weight in zip(families, base):
         totals[family] = totals.get(family, 0.0) + float(weight)
-    return np.array([weight / max(1.0, totals[family])
-                     for family, weight in zip(families, base)], dtype=np.float64)
+    return np.array(
+        [weight / max(1.0, totals[family]) for family, weight in zip(families, base)],
+        dtype=np.float64,
+    )
 
 
-def observed_controls_match(left: dict, right: dict, required_keys: tuple[str, ...]) -> bool:
+def observed_controls_match(
+    left: dict, right: dict, required_keys: tuple[str, ...]
+) -> bool:
     """Small per-slot check; full qualification also checks identity and visibility.
 
     Pass observed controls only. Matching requested recipes is not evidence.
