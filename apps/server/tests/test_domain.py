@@ -619,3 +619,99 @@ def test_predictions_precede_feedback_and_disagreement_is_explicit(
     assert report["allPrequential"]["count"] == 1
     assert report["heldOutLineageAndExactSource"]["count"] == 0
     assert report["status"] == "inconclusive_observational_evidence"
+
+
+def test_user_crop_preserves_source_family_and_separate_coordinates(
+    service, project, tmp_path
+):
+    import json
+
+    assets = Assets(service, tmp_path)
+    source = assets.import_image("alice", project, image_bytes())["assetId"]
+    first = assets.crop(
+        "alice", project, source, {"x": 0, "y": 0, "width": 4, "height": 8}
+    )
+    second = assets.crop(
+        "alice", project, source, {"x": 4, "y": 0, "width": 4, "height": 8}
+    )
+    assert (
+        first["assetId"] != second["assetId"]
+    )  # identical pixels, different source coordinates
+    repeated = assets.crop(
+        "alice", project, source, {"x": 0, "y": 0, "width": 4, "height": 8}
+    )
+    assert repeated["assetId"] == first["assetId"]
+    with service.database.connect() as db:
+        row = service.get(db, "assets", project, "asset_id", second["assetId"])
+        assert row["parent_asset_id"] == source
+        assert json.loads(row["provenance_json"])["crop"]["x"] == 4
+    with pytest.raises(DomainError):
+        assets.crop("bob", project, source, {"x": 0, "y": 0, "width": 4, "height": 8})
+    with pytest.raises(DomainError, match="bounds"):
+        assets.crop(
+            "alice", project, source, {"x": 15, "y": 0, "width": 4, "height": 8}
+        )
+
+
+def test_branch_variations_retain_parent_provenance_and_locks(service, project):
+    import json
+
+    original = design(service, project)
+    service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="lock_property",
+            subjectVersionIds=[original["version_id"]],
+            propertyKey="hair.color",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )
+    branch = service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="fork_branch",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )["childBranchId"]
+    spec = original["spec"]
+    spec["properties"]["outfit.color"] = {"value": "blue", "state": "proposed"}
+    variant = service.create_design(
+        "alice",
+        project,
+        DesignInput(
+            title="Branch variant",
+            branchId=branch,
+            basedOnVersionId=original["version_id"],
+            spec=CanonicalInput.model_validate(spec),
+        ),
+    )
+    assert (
+        variant["parent_version_id"] is None
+    )  # new lineage; source recorded in immutable intent event
+    assert service.preferences("alice", project, branch)["locks"][
+        variant["version_id"]
+    ] == ["hair.color"]
+    with service.database.connect() as db:
+        event = db.execute(
+            "SELECT payload_json FROM events WHERE project_id=? AND sequence=?",
+            (project, variant["created_sequence"]),
+        ).fetchone()
+        assert json.loads(event[0])["basedOnVersionId"] == original["version_id"]
+    changed = variant["spec"]
+    changed["properties"]["hair.color"]["value"] = "gold"
+    with pytest.raises(DomainError, match="Unlock"):
+        service.new_version(
+            "alice",
+            project,
+            variant["design_id"],
+            VersionInput(
+                parentVersionId=variant["version_id"],
+                spec=CanonicalInput.model_validate(changed),
+                expectedEventSequence=sequence(service, project),
+                reason="attempt to change inherited lock",
+            ),
+        )

@@ -206,3 +206,52 @@ test("matched visual comparison records only the shown scoped evidence", async (
     fullPage: true,
   });
 });
+
+test("native Codex connection, generation and unreviewed evidence round trip", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("http://127.0.0.1:8767/#launch=codex-browser-test");
+  await expect(page.getByText("LOCAL CODEX", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "06 Account & privacy" }).click();
+  await expect(page.getByText("연결됨", { exact: false })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue with ChatGPT" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "01 Explore designs" }).click();
+  await page.getByLabel("Project name").fill("Codex generation");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await page.getByRole("button", { name: "Add your first design" }).click();
+  await page.getByLabel("Design name").fill("Moon traveller");
+  await page.getByLabel("Character structure").selectOption("humanoid");
+  await page
+    .getByLabel("Character idea")
+    .fill("Friendly silver-haired traveller with blue clothes.");
+  await page.getByRole("button", { name: "Create design direction" }).click();
+  await page.getByRole("button", { name: "04 Prompt workspace" }).click();
+  await page.getByLabel("Requested view").selectOption("front");
+  await page.getByRole("button", { name: "Prepare text prompt" }).click();
+  await expect(page.getByLabel("Codex 모델")).toHaveValue("test-model");
+  await page.getByRole("button", { name: "Codex로 이미지 1장 생성" }).click();
+  await expect(
+    page.getByAltText("Codex 생성 이미지 · 검토 대기"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("생성 완료 · 검토 대기", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/style-explorer-codex-browser.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "생성 이미지 검토" }).click();
+  await expect(
+    page.getByRole("button", { name: "Review evidence →", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("article").getByText("unreviewed", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("LOCAL CODEX", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});

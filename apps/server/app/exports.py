@@ -162,6 +162,8 @@ class Exports:
                         "versionId": version_id,
                         "assetId": asset["asset_id"],
                         "originalSha256": asset["digest"],
+                        "parentAssetId": asset["parent_asset_id"],
+                        "assetProvenance": json.loads(asset["provenance_json"]),
                         "reviewStatus": link["status"],
                         "evidenceKind": "user_reported_model_capture"
                         if depiction["source_build_id"]
@@ -169,6 +171,19 @@ class Exports:
                         "sourceBuildId": depiction["source_build_id"],
                         "sourcePlanId": depiction["origin_plan_id"],
                         "sourcePromptRevision": depiction["origin_prompt_revision"],
+                        "generationProvenance": {
+                            key: metadata[key]
+                            for key in (
+                                "provider",
+                                "jobId",
+                                "threadId",
+                                "turnId",
+                                "toolCallId",
+                                "revisedPrompt",
+                                "staleAtCompletion",
+                            )
+                            if key in metadata
+                        },
                         "exportPermission": included,
                         "observations": link["observations"],
                         "assessment": link["assessment"],

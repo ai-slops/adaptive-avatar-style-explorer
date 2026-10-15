@@ -34,6 +34,10 @@ export function App() {
     [editor, setEditor] = useState<Version | null | false>(false);
   const [compareIds, setCompareIds] = useState<string[]>([]),
     [branch, setBranch] = useState("main");
+  const [branches, setBranches] = useState<
+    { branch_id: string; parent_sequence: number | null }[]
+  >([]);
+  const [codex, setCodex] = useState(false);
   const [rankingRegion, setRankingRegion] = useState("whole");
   const project = projects.find((p) => p.project_id === projectId);
   const allVersions = designs.flatMap((d) => d.versions);
@@ -54,15 +58,19 @@ export function App() {
       setBusy(false);
     }
   }
-  async function refresh(p = projectId) {
+  async function refresh(p = projectId, branchId = branch) {
     const list = await api<Project[]>("/projects");
     setProjects(list);
     if (!p) return;
-    const [ds, pref, packs] = await Promise.all([
-      api<Design[]>(`/projects/${p}/designs?branchId=${branch}`),
-      api<Preferences>(`/projects/${p}/preferences?branchId=${branch}`),
+    const [ds, pref, packs, branchList] = await Promise.all([
+      api<Design[]>(`/projects/${p}/designs?branchId=${branchId}`),
+      api<Preferences>(`/projects/${p}/preferences?branchId=${branchId}`),
       api<Plan[]>(`/projects/${p}/prompt-packs`),
+      api<{ branch_id: string; parent_sequence: number | null }[]>(
+        `/projects/${p}/branches`,
+      ),
     ]);
+    setBranches(branchList);
     setDesigns(ds);
     setPreferences(pref);
     setPlans(packs);
@@ -86,11 +94,15 @@ export function App() {
       const launch = new URLSearchParams(location.hash.slice(1)).get("launch");
       try {
         const session = launch
-          ? await api<{ csrfToken: string }>("/session/bootstrap", {
-              secret: launch,
-            })
-          : await api<{ csrfToken: string }>("/session");
+          ? await api<{ csrfToken: string; mode: string }>(
+              "/session/bootstrap",
+              {
+                secret: launch,
+              },
+            )
+          : await api<{ csrfToken: string; mode: string }>("/session");
         setCSRF(session.csrfToken);
+        setCodex(session.mode === "codex_local");
         history.replaceState(null, "", location.pathname);
         setReady(true);
         const list = await api<Project[]>("/projects");
@@ -122,7 +134,12 @@ export function App() {
   }
   const current = designs
     .filter((d) => d.branch_id === branch || branch !== "main")
-    .map((d) => d.versions[0])
+    .flatMap((d) => [
+      d.versions[0],
+      ...d.versions
+        .slice(1)
+        .filter((v) => preferences?.shortlist.includes(v.version_id)),
+    ])
     .filter((v) => !preferences?.rejected.includes(v.version_id));
 
   const ranking = preferences?.rankings[rankingRegion];
@@ -176,6 +193,7 @@ export function App() {
           id="project"
           value={projectId}
           onChange={(e) => {
+            setBranch("main");
             setProjectId(e.target.value);
             setSelected("");
             setCompareIds([]);
@@ -194,6 +212,27 @@ export function App() {
         >
           ＋ New project
         </button>
+        {project && (
+          <label className="branch-picker">
+            Design branch
+            <select
+              value={branch}
+              onChange={(e) => {
+                setBranch(e.target.value);
+                setSelected("");
+                setCompareIds([]);
+              }}
+            >
+              {branches.map((b) => (
+                <option value={b.branch_id} key={b.branch_id}>
+                  {b.branch_id === "main"
+                    ? "Main exploration"
+                    : `Alternative · through ${b.parent_sequence}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <nav aria-label="Workspace">
           {[
             ["explore", "01", "Explore designs"],
@@ -221,7 +260,9 @@ export function App() {
           <p>
             Selected images leave only with consent.
             <br />
-            Prompts are prepared as text.
+            {codex
+              ? "Codex generates images on request."
+              : "Prompts are prepared as text."}
           </p>
           <button
             className="text-button"
@@ -243,7 +284,7 @@ export function App() {
             {project?.title || "Your next character"}{" "}
             <span className="muted">/ {human(screen)}</span>
           </span>
-          <span className="pill">PROMPT ONLY</span>
+          <span className="pill">{codex ? "LOCAL CODEX" : "PROMPT ONLY"}</span>
         </header>
         <main>
           <div aria-live="polite">
@@ -264,6 +305,7 @@ export function App() {
           </div>
           {screen === "account" ? (
             <Account
+              codex={codex}
               run={run}
               onSwitch={async () => {
                 setProjectId("");
@@ -293,8 +335,9 @@ export function App() {
                     const p = await api<Project>("/projects", {
                       title: data.get("title"),
                     });
+                    setBranch("main");
                     setProjectId(p.project_id);
-                    await refresh(p.project_id);
+                    await refresh(p.project_id, "main");
                     setScreen("explore");
                   });
                 }}
@@ -659,6 +702,7 @@ export function App() {
                         evidence={evidence[selected]}
                         project={project}
                         plans={plans}
+                        codex={codex}
                         run={run}
                         refresh={() => refresh()}
                         notice={setNotice}
@@ -700,21 +744,32 @@ export function App() {
           onClose={() => setEditor(false)}
           onSave={async (title, spec, reason) => {
             await run(async () => {
-              const v = editor
-                ? await api<Version>(
-                    base + `/designs/${editor.design_id}/versions`,
-                    {
-                      parentVersionId: editor.version_id,
-                      spec,
-                      reason,
-                      expectedEventSequence: project?.event_sequence,
-                    },
-                  )
-                : await api<Version>(base + "/designs", {
-                    title,
+              const inherited =
+                editor &&
+                designs.find((d) => d.design_id === editor.design_id)
+                  ?.branch_id !== branch;
+              const v = inherited
+                ? await api<Version>(base + "/designs", {
+                    title: `${designs.find((d) => d.design_id === editor.design_id)?.title ?? "Design"} · alternative`,
                     spec,
                     branchId: branch,
-                  });
+                    basedOnVersionId: editor.version_id,
+                  })
+                : editor
+                  ? await api<Version>(
+                      base + `/designs/${editor.design_id}/versions`,
+                      {
+                        parentVersionId: editor.version_id,
+                        spec,
+                        reason,
+                        expectedEventSequence: project?.event_sequence,
+                      },
+                    )
+                  : await api<Version>(base + "/designs", {
+                      title,
+                      spec,
+                      branchId: branch,
+                    });
               setSelected(v.version_id);
               await refresh();
               setEditor(false);

@@ -41,7 +41,9 @@ export function Reasoning({
     const [s, c, j] = await Promise.all([
       api<SessionInfo>("/session"),
       api<{ allowImageAnalysis: boolean }>(base + "/image-analysis-consent"),
-      api<Job[]>(base + "/jobs"),
+      api<SessionInfo>("/session").then((s) =>
+        api<Job[]>(base + (s.mode === "codex_local" ? "/codex/jobs" : "/jobs")),
+      ),
     ]);
     setSession(s);
     setConsent(c.allowImageAnalysis);
@@ -59,55 +61,63 @@ export function Reasoning({
     }, 1000);
     return () => clearInterval(timer);
   }, [live, version.version_id]);
-  if (!session?.registrationId) return null;
+  const native = session?.mode === "codex_local";
+  const jobsPath = base + (native ? "/codex/jobs" : "/jobs");
+  if (!native && !session?.registrationId) return null;
   return (
     <details className="paper-panel assistance">
       <summary>
-        Optional account analysis · {session.remainingRequests} requests left{" "}
-        {session.usagePaused ? "· Usage paused" : ""}
+        Optional {native ? "Codex" : "account"} analysis ·{" "}
+        {native
+          ? "one turn per action"
+          : `${session?.remainingRequests} requests left`}{" "}
+        {session?.usagePaused ? "· Usage paused" : ""}
       </summary>
       <p>
         Explicitly choose a bounded text/vision task. Results are suggestions
         for review; they never confirm intent or validate geometry.
       </p>
       <div className="inline-inputs">
-        <label>
-          Session request budget
-          <input
-            type="number"
-            min={0}
-            max={20}
-            value={budget}
-            onChange={(e) => setBudget(Number(e.target.value))}
-          />
-        </label>
+        {!native && (
+          <>
+            <label>
+              Session request budget
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={budget}
+                onChange={(e) => setBudget(Number(e.target.value))}
+              />
+            </label>
+            <button
+              onClick={() =>
+                void run(async () => {
+                  await api("/provider/budget", { requests: budget });
+                  await load();
+                })
+              }
+            >
+              Set budget
+            </button>
+            <button
+              onClick={() =>
+                void run(async () => {
+                  await api("/provider/budget", { requests: 0 });
+                  await load();
+                })
+              }
+            >
+              Pause new requests
+            </button>
+          </>
+        )}
         <button
           onClick={() =>
             void run(async () => {
-              await api("/provider/budget", { requests: budget });
-              await load();
-            })
-          }
-        >
-          Set budget
-        </button>
-        <button
-          onClick={() =>
-            void run(async () => {
-              await api("/provider/budget", { requests: 0 });
-              await load();
-            })
-          }
-        >
-          Pause new requests
-        </button>
-        <button
-          onClick={() =>
-            void run(async () => {
-              const catalog =
-                await api<{ slug: string; display_name: string }[]>(
-                  "/provider/models",
-                );
+              const catalog = await api<
+                { slug: string; display_name: string }[]
+              >(native ? "/codex/models" : "/provider/models");
               setModels(catalog);
               setModel(catalog[0]?.slug ?? "");
             })
@@ -189,11 +199,20 @@ export function Reasoning({
       <button
         className="primary"
         disabled={
-          !model || session.remainingRequests < 1 || session.usagePaused || live
+          !model ||
+          (!native &&
+            ((session?.remainingRequests ?? 0) < 1 || session?.usagePaused)) ||
+          live
         }
         onClick={() =>
           void run(async () => {
-            await api(base + "/jobs", {
+            await api(native ? base + "/codex/analyze" : jobsPath, {
+              ...(native
+                ? {
+                    authorizeOneTurn: true,
+                    approveReferenceTransmission: consent,
+                  }
+                : {}),
               requestId: crypto.randomUUID(),
               task,
               versionId: version.version_id,
@@ -208,7 +227,10 @@ export function Reasoning({
         Analyze selected evidence as text →
       </button>
       {jobs
-        .filter((j) => j.versionId === version.version_id)
+        .filter(
+          (j) =>
+            j.versionId === version.version_id && j.task !== "generate_image",
+        )
         .map((j) => (
           <div className="job" key={j.jobId}>
             <div className="section-heading">
@@ -219,7 +241,7 @@ export function Reasoning({
                 <button
                   onClick={() =>
                     void run(async () => {
-                      await api(base + `/jobs/${j.jobId}/cancel`, {});
+                      await api(jobsPath + `/${j.jobId}/cancel`, {});
                       await load();
                     })
                   }

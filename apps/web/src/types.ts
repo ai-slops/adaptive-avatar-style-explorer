@@ -150,6 +150,8 @@ export type Preferences = {
 };
 
 export type SessionInfo = {
+  mode: "codex_local" | "community_prompt_only";
+  allowImageGeneration: boolean;
   registrationId: string | null;
   remainingRequests: number;
   usagePaused: boolean;
@@ -162,11 +164,15 @@ export type Registration = {
   display_name: string;
 };
 export type Job = {
+  planId?: string;
+  promptRevision?: number;
   jobId: string;
   state: string;
   task: string;
   versionId: string;
   result: {
+    assetId?: string;
+    phase?: string;
     suggestions?: {
       summary: string;
       observations: { linkId: string; observation: Observation }[];

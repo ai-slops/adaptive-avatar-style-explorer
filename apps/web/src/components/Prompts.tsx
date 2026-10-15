@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { Version, Evidence, Project, Plan } from "../types";
 import { human, views, describe } from "../ui";
+import { CodexGenerate } from "./Codex";
 import { api, download } from "../api";
 export function Prompts({
+  codex = false,
   version,
   evidence,
   project,
@@ -12,6 +14,7 @@ export function Prompts({
   notice,
   onImport,
 }: {
+  codex?: boolean;
   version: Version;
   evidence: Evidence;
   project: Project;
@@ -40,8 +43,9 @@ export function Prompts({
       <section className="paper-panel">
         <h2>One request. One clear purpose.</h2>
         <p>
-          Prepare text, then independently produce the result in a tool of your
-          choice. Import it here for review.
+          {codex
+            ? "프롬프트를 준비한 뒤 Codex로 이미지를 생성하고 검토할 수 있습니다."
+            : "Prepare text, then independently produce the result in a tool of your choice. Import it here for review."}
         </p>
         <form
           onSubmit={(e) => {
@@ -205,7 +209,19 @@ export function Prompts({
               Copy text ↗
             </button>
           </div>
-          <pre>{p.promptText}</pre>
+          {codex && (
+            <CodexGenerate
+              plan={p}
+              project={project}
+              run={run}
+              refresh={refresh}
+              onReview={onImport}
+            />
+          )}
+          <details open={!codex}>
+            <summary>Prompt text</summary>
+            <pre>{p.promptText}</pre>
+          </details>
           {p.references.map((r) => (
             <p key={r.attachmentOrder}>
               Attachment {r.attachmentOrder}: {r.role} ·{" "}

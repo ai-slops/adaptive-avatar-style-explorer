@@ -93,6 +93,7 @@ class CanonicalInput(Strict):
 class DesignInput(Strict):
     title: str = Field(min_length=1, max_length=120)
     branchId: str = "main"
+    basedOnVersionId: str | None = None
     spec: CanonicalInput
 
 
@@ -458,3 +459,27 @@ class FindingResolutionInput(Strict):
     state: Literal["resolved", "accepted_tradeoff", "dismissed"]
     rationale: str = Field(min_length=10, max_length=3000)
     expectedEventSequence: int = Field(ge=0)
+
+
+class CropInput(Strict):
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    expectedEventSequence: int = Field(ge=0)
+
+
+class CodexGenerationInput(Strict):
+    requestId: str = Field(min_length=1, max_length=100)
+    planId: str
+    promptRevision: int = Field(ge=1)
+    model: str = Field(min_length=1, max_length=200)
+    authorizeOneTurn: Literal[True]
+    approveReferenceTransmission: bool = False
+    exportPermission: bool = False
+    expectedEventSequence: int = Field(ge=0)
+
+
+class CodexAnalysisInput(JobInput):
+    authorizeOneTurn: Literal[True]
+    approveReferenceTransmission: bool = False

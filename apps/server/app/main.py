@@ -14,14 +14,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import Field
 
-from .common import DomainError
+from .codex_jobs import CodexJobs
+from .common import DomainError, canonical, require, uid
 from .contracts import (
     ActiveRegistrationInput,
     AuthStartInput,
     BindOfflineInput,
     BudgetInput,
     CheckpointInput,
+    CodexAnalysisInput,
+    CodexGenerationInput,
     ConsentInput,
+    CropInput,
     DepictionInput,
     DesignInput,
     EvaluationProfileInput,
@@ -62,7 +66,13 @@ def create_app(
     origin="http://127.0.0.1:8765",
     bootstrap_secret=None,
     provider_transport=None,
+    execution_mode="community_prompt_only",
+    codex_rpc_factory=None,
 ):
+    require(
+        execution_mode in ("community_prompt_only", "codex_local"),
+        "Unknown execution mode",
+    )
     root = Path(data_root or ".data")
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     service = Service(Database(root / "workspace.sqlite"))
@@ -82,9 +92,23 @@ def create_app(
     provider = SIWC(service, root / "credentials", origin, transport=provider_transport)
     jobs = Jobs(service, provider, assets, sessions)
 
+    native = (
+        CodexJobs(
+            service,
+            assets,
+            jobs,
+            root / "codex-runs",
+            **({"rpc_factory": codex_rpc_factory} if codex_rpc_factory else {}),
+        )
+        if execution_mode == "codex_local"
+        else None
+    )
+
     @asynccontextmanager
     async def lifespan(app):
         yield
+        if native:
+            await native.close()
         await jobs.close()
         await provider.close()
 
@@ -101,6 +125,7 @@ def create_app(
     app.state.sessions = sessions
     app.state.provider = provider
     app.state.jobs = jobs
+    app.state.codex_jobs = native
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
@@ -159,7 +184,16 @@ def create_app(
             "remainingRequests": 0,
             "usagePaused": False,
         }
-        response = JSONResponse({"csrfToken": csrf, "profile": "Local offline profile"})
+        response = JSONResponse(
+            {
+                "csrfToken": csrf,
+                "profile": "Local Codex workspace"
+                if native
+                else "Local offline profile",
+                "mode": execution_mode,
+                "allowImageGeneration": native is not None,
+            }
+        )
         response.set_cookie(
             "avatar_session",
             session_id,
@@ -180,12 +214,13 @@ def create_app(
             "registrationId": request.state.session.get("registration"),
             "remainingRequests": request.state.session.get("remainingRequests", 0),
             "usagePaused": request.state.session.get("usagePaused", False),
-            "mode": "community_prompt_only",
-            "allowImageGeneration": False,
+            "mode": execution_mode,
+            "allowImageGeneration": native is not None,
         }
 
     @app.post("/api/auth/siwc/start")
     def auth_start(data: AuthStartInput, request: Request):
+        require(native is None, "This installation uses the local Codex login", 409)
         return provider.start(request.cookies["avatar_session"], data.registrationId)
 
     @app.get("/auth/callback")
@@ -228,6 +263,7 @@ def create_app(
 
     @app.post("/api/auth/active-registration")
     def active_registration(data: ActiveRegistrationInput, request: Request):
+        require(native is None, "Local Codex mode uses the installation owner", 409)
         session_id = request.cookies["avatar_session"]
         current = sessions[session_id]
         if data.registrationId:
@@ -260,6 +296,9 @@ def create_app(
             if current.get("registration")
             else {"remoteRevocationConfirmed": False}
         )
+        if native:
+            for task in list(native.tasks.values()):
+                task.cancel()
         sessions.pop(session_id, None)
         response = JSONResponse({"localSignedOut": True, **remote})
         response.delete_cookie("avatar_session")
@@ -349,6 +388,51 @@ def create_app(
     def cancel_job(p: str, j: str, request: Request):
         return jobs.cancel(request.state.principal, p, j)
 
+    if native:
+
+        def local_owner(request):
+            require(
+                request.state.principal == principal,
+                "Local installation owner required",
+                403,
+            )
+            return principal
+
+        @app.get("/api/codex/status")
+        async def codex_status(request: Request):
+            local_owner(request)
+            return await native.status()
+
+        @app.get("/api/codex/models")
+        async def codex_models(request: Request):
+            local_owner(request)
+            return await native.models()
+
+        @app.post("/api/codex/login")
+        async def codex_login(request: Request):
+            local_owner(request)
+            return await native.login()
+
+        @app.post("/api/projects/{p}/codex/generate")
+        async def codex_generate(p: str, data: CodexGenerationInput, request: Request):
+            return await native.enqueue(local_owner(request), p, data)
+
+        @app.post("/api/projects/{p}/codex/analyze")
+        async def codex_analyze(p: str, data: CodexAnalysisInput, request: Request):
+            return await native.enqueue(local_owner(request), p, data)
+
+        @app.get("/api/projects/{p}/codex/jobs")
+        def codex_list(p: str, request: Request):
+            return native.list(local_owner(request), p)
+
+        @app.get("/api/projects/{p}/codex/jobs/{j}")
+        def codex_read(p: str, j: str, request: Request):
+            return native.read(local_owner(request), p, j)
+
+        @app.post("/api/projects/{p}/codex/jobs/{j}/cancel")
+        async def codex_cancel(p: str, j: str, request: Request):
+            return native.cancel(local_owner(request), p, j)
+
     @app.get("/api/projects")
     def projects(request: Request):
         return service.projects(request.state.principal)
@@ -356,6 +440,17 @@ def create_app(
     @app.post("/api/projects")
     def create_project(request: Request, data: ProjectInput):
         return service.create_project(request.state.principal, data.title)
+
+    @app.get("/api/projects/{p}/branches")
+    def branches(p: str, request: Request):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM branches WHERE project_id=? ORDER BY rowid", (p,)
+                )
+            ]
 
     @app.get("/api/projects/{p}/designs")
     def designs(p: str, request: Request, branchId: str = "main"):
@@ -393,6 +488,87 @@ def create_app(
     @app.post("/api/projects/{p}/depiction-links")
     def link(p: str, data: LinkInput, request: Request):
         return service.create_link(request.state.principal, p, data)
+
+    @app.get("/api/projects/{p}/assets/{a}/metadata")
+    def asset_metadata(p: str, a: str, request: Request):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            asset = service.get(db, "assets", p, "asset_id", a)
+            return {
+                "width": asset["width"],
+                "height": asset["height"],
+                "parentAssetId": asset["parent_asset_id"],
+            }
+
+    @app.post("/api/projects/{p}/depiction-links/{l}/crop")
+    def crop_depiction(p: str, l: str, data: CropInput, request: Request):
+        import json
+
+        with service.database.connect() as db:
+            state = service.owned(db, request.state.principal, p)
+            service.sequence(state, data.expectedEventSequence)
+            link = service.get(db, "depiction_links", p, "link_id", l)
+            original = service.get(
+                db, "depictions", p, "depiction_id", link["depiction_id"]
+            )
+        asset = assets.crop(
+            request.state.principal,
+            p,
+            original["asset_id"],
+            data.model_dump(exclude={"expectedEventSequence"}),
+        )
+        metadata = json.loads(original["metadata_json"])
+        if original["source_kind"] == "private_owner_result":
+            depiction_id = uid()
+            metadata["caption"] = (
+                "User-selected crop of Codex result; unreviewed adherence."
+            )
+            with service.database.connect() as db:
+                service.owned(db, request.state.principal, p)
+                db.execute(
+                    "INSERT INTO depictions VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        p,
+                        depiction_id,
+                        asset["assetId"],
+                        original["source_kind"],
+                        original["origin_plan_id"],
+                        original["origin_prompt_revision"],
+                        None,
+                        canonical(metadata),
+                    ),
+                )
+            depiction = {"depictionId": depiction_id}
+        else:
+            depiction = service.create_depiction(
+                request.state.principal,
+                p,
+                DepictionInput(
+                    assetId=asset["assetId"],
+                    sourceKind=original["source_kind"],
+                    originPlanId=original["origin_plan_id"],
+                    originPromptRevision=original["origin_prompt_revision"],
+                    sourceBuildId=original["source_build_id"],
+                    explicitlyUnassociated=metadata.get(
+                        "explicitlyUnassociated", False
+                    ),
+                    exportPermission=metadata["exportPermission"],
+                    caption="User-selected crop; source coordinates preserved in asset provenance.",
+                ),
+            )
+        result = service.create_link(
+            request.state.principal,
+            p,
+            LinkInput(
+                depictionId=depiction["depictionId"], versionId=link["version_id"]
+            ),
+        )
+        return {
+            **result,
+            "assetId": asset["assetId"],
+            "versionId": link["version_id"],
+            "status": "unreviewed",
+        }
 
     @app.post("/api/projects/{p}/evidence-reviews")
     def review_evidence(p: str, data: EvidenceReviewInput, request: Request):
@@ -520,7 +696,22 @@ def create_app(
         )
 
     @app.delete("/api/projects/{p}")
-    def delete_project(p: str, request: Request):
+    async def delete_project(p: str, request: Request):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            active_jobs = [
+                row[0]
+                for row in db.execute(
+                    "SELECT job_id FROM jobs WHERE project_id=? AND state IN ('queued','running')",
+                    (p,),
+                )
+            ]
+        for job_id in active_jobs:
+            jobs.cancel(request.state.principal, p, job_id)
+        if native:
+            for item in native.list(request.state.principal, p):
+                if item["state"] in ("queued", "running"):
+                    native.cancel(request.state.principal, p, item["jobId"])
         with service.database.connect() as db:
             service.owned(db, request.state.principal, p)
             db.execute("DELETE FROM projects WHERE project_id=?", (p,))
@@ -529,7 +720,7 @@ def create_app(
         ).exists() else None
         return {
             "deleted": True,
-            "retention": "Project database records and on-disk assets removed. Previously downloaded exports are outside application control.",
+            "retention": "Project database records and application-owned assets removed. Previously downloaded exports and Codex-managed caches are outside application control.",
         }
 
     web = Path(__file__).resolve().parents[2] / "web" / "dist"

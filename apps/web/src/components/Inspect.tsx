@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { image, human } from "../ui";
 import { api } from "../api";
+import { CropEditor } from "./CropEditor";
 import { ProfileEditor } from "./ProfileEditor";
 import { FindingDisposition } from "./FindingDisposition";
 import { EvidenceEditor } from "./EvidenceEditor";
@@ -38,6 +39,7 @@ export function Inspect({
     e?: Record<string, unknown>,
   ) => Promise<void>;
 }) {
+  const [cropping, setCropping] = useState<Link | null>(null);
   const [profileEditor, setProfileEditor] = useState(false);
   const [reviewing, setReviewing] = useState<Link | null>(null),
     [importPlan, setImportPlan] = useState(""),
@@ -259,6 +261,9 @@ export function Inspect({
                 )}
               </h3>
               <p>{human(link.depiction.source_kind)}</p>
+              <button onClick={() => setCropping(link)}>
+                Crop visible region
+              </button>
               <button onClick={() => setReviewing(link)}>
                 {link.status === "unreviewed"
                   ? "Review evidence"
@@ -305,6 +310,15 @@ export function Inspect({
           </button>
         ) : null}
       </div>
+      {cropping && (
+        <CropEditor
+          link={cropping}
+          project={project}
+          onClose={() => setCropping(null)}
+          onSaved={refresh}
+          run={run}
+        />
+      )}
       {profileEditor && (
         <ProfileEditor
           evidence={evidence}

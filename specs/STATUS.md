@@ -1,6 +1,7 @@
 # Implementation and verification status
 
-Target: specification v2, all MVP milestones M0–M5. No existing application or v1
+Target: specification v2, all MVP milestones M0–M5, amended by
+[the requested local Codex mode](codex-local-mode.md). No existing application or v1
 installation was present at initialization. This is a fresh-install implementation.
 
 - M0: baseline implemented — canonical SQLite schema, strict write contracts,
@@ -35,18 +36,49 @@ installation was present at initialization. This is a fresh-install implementati
 
 ## Current verification
 
-- 46 Python tests pass: domain/service transactions, reference numerical behavior,
+- 55 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- Two real Chromium end-to-end tests pass through project/design creation,
+- Three real Chromium end-to-end tests pass through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
   acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
-  that updates only its regional preference model.
+  that updates only its regional preference model. The third checks native-mode
+  connection, generation, unreviewed import and reload using an isolated fake worker.
 - Browser fixtures use synthetic raster bytes to test workflow. They do not prove
   visual extraction accuracy or preference quality.
 
-Release remains unverified until Section 17 is audited, including live SIWC and
-manual two-user end-to-end tests. Numerical tests do not establish visual invariance.
-No production readiness or complete MVP claim is made.
+## Local Codex acceptance (2026-10-15)
+
+- The launcher defaults to native local Codex; SIWC prompt-only mode is selectable.
+  Native routes are registered only by the server-selected mode and require the
+  bootstrap-authenticated installation owner. Request role flags cannot enable them.
+- Installed codex-cli 0.162.1 app-server initialized successfully, read the existing
+  ChatGPT account and model catalog, and completed a native image-generation turn.
+  A separate live request through the running application's enqueue/poll/import
+  pipeline also succeeded using the installed default `gpt-6.1-sol`.
+- The application imported exactly one terminal native artifact, preserved its
+  immutable target/hash and prompt revision, recorded thread/turn/tool provenance,
+  and created an unreviewed depiction with no automatic observations or coverage.
+  The sample project is local data and is not committed.
+- Credentials remain managed by Codex. Child workers disable shell, apps, plugins,
+  MCP configuration, browsing and delegation. They reject interactive tool requests.
+  API-key fallback is rejected. Only native structured image artifacts are imported.
+- Tests cover idempotency, ownership, terminal failures, cancellation, stale output,
+  bounded artifact paths, login type, mode isolation and strict analysis suggestions.
+  Crop coordinates/source families and inherited branch locks are also tested.
+- After explicit user approval to transmit the generated sample, a live Codex
+  vision-analysis job completed successfully and passed strict application validation.
+  The native transport closes all objects and sends sparse attributes as typed rows
+  with fixed numeric bounds/categorical values before restoring the domain map.
+  Initial response-schema failures were fixed and retained as failed jobs; each
+  verification attempt was explicitly issued, with no automatic retry. The successful
+  result remains unconfirmed suggestions and adds no observations or design changes.
+
+The local Codex generation acceptance gate is satisfied. A live SIWC callback is
+no longer a gate for this user-requested mode. SIWC distribution/two-user live
+verification, legacy migration, empirical preference quality and visual extraction
+accuracy remain outside the verified local experience. Numerical tests do not
+establish visual invariance. No production readiness or complete original MVP
+release claim is made.

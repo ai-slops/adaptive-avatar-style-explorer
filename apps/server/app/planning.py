@@ -180,6 +180,7 @@ class Planning:
                     **json.loads(row["payload_json"]),
                     "freshness": "current"
                     if row["input_sequence"] == state["event_sequence"]
+                    and row["constraints_version"] == state["constraints_version"]
                     else "historical",
                 }
                 for row in db.execute(

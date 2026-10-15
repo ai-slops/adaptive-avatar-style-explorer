@@ -180,9 +180,10 @@ class Service:
                 return self.get(
                     db, "evaluation_profiles", project, "profile_id", row[0]
                 )
-            if not version["parent_version_id"]:
+            parent = self.design_parent(db, project, version)
+            if not parent:
                 break
-            version = self.version(db, project, version["parent_version_id"])
+            version = self.version(db, project, parent)
             if version["spec"]["morphology"] != original["spec"]["morphology"]:
                 break
         return self.get(
@@ -205,9 +206,38 @@ class Service:
     def create_design(self, principal, project, data: DesignInput):
         with self.database.connect() as db:
             self.owned(db, principal, project)
-            self.get(db, "branches", project, "branch_id", data.branchId)
+            branch = self.get(db, "branches", project, "branch_id", data.branchId)
             spec = data.spec.model_dump()
             self.validate_sources(db, project, spec)
+            if data.basedOnVersionId:
+                source = self.version(db, project, data.basedOnVersionId)
+                source_design = self.get(
+                    db, "designs", project, "design_id", source["design_id"]
+                )
+                require(
+                    self.visible_in_branch(
+                        db,
+                        project,
+                        branch,
+                        source_design["branch_id"],
+                        source["created_sequence"],
+                    ),
+                    "Source design is outside branch history",
+                )
+                require(
+                    digest(spec) != source["canonical_hash"],
+                    "No design change: keep the existing version in the new branch",
+                )
+                locks = self.reduce(db, project, data.branchId)["locks"]
+                for key in self.inherited_locks(
+                    db, project, data.basedOnVersionId, locks
+                ):
+                    require(
+                        spec["properties"].get(key, {}).get("value")
+                        == source["spec"]["properties"].get(key, {}).get("value"),
+                        f"Unlock {key} in this branch before changing it",
+                        409,
+                    )
             design, version = uid(), uid()
             db.execute(
                 "INSERT INTO designs VALUES (?,?,?,?)",
@@ -218,7 +248,14 @@ class Service:
                 project,
                 data.branchId,
                 "adopt_variant",
-                {"versionId": version, "spec": spec, "reason": "Initial design intent"},
+                {
+                    "versionId": version,
+                    "spec": spec,
+                    "reason": "Branch design variation"
+                    if data.basedOnVersionId
+                    else "Initial design intent",
+                    "basedOnVersionId": data.basedOnVersionId,
+                },
                 "design_intent",
             )
             db.execute(
@@ -827,11 +864,22 @@ class Service:
         ]
         return inherited + local
 
+    def design_parent(self, db, project, version):
+        if version["parent_version_id"]:
+            return version["parent_version_id"]
+        event = db.execute(
+            "SELECT payload_json FROM events WHERE project_id=? AND sequence=?",
+            (project, version["created_sequence"]),
+        ).fetchone()
+        return json.loads(event[0]).get("basedOnVersionId") if event else None
+
     def inherited_locks(self, db, project, version_id, locks):
         result = set()
         while version_id:
             result.update(locks.get(version_id, []))
-            version_id = self.version(db, project, version_id)["parent_version_id"]
+            version_id = self.design_parent(
+                db, project, self.version(db, project, version_id)
+            )
         return sorted(result)
 
     def reduce(self, db, project, branch_id):
@@ -1125,6 +1173,7 @@ class Service:
         for design in db.execute(
             "SELECT * FROM designs WHERE project_id=? ORDER BY rowid", (project,)
         ):
+            latest_visible = True
             for row in db.execute(
                 "SELECT * FROM design_versions WHERE project_id=? AND design_id=? ORDER BY revision DESC",
                 (project, design["design_id"]),
@@ -1132,12 +1181,18 @@ class Service:
                 if self.visible_in_branch(
                     db, project, branch, design["branch_id"], row["created_sequence"]
                 ):
+                    if (
+                        not latest_visible
+                        and row["version_id"] not in state["shortlist"]
+                    ):
+                        continue
+                    latest_visible = False
                     if row["version_id"] not in state["rejected"]:
                         links = self.current_links(db, project, row["version_id"])
                         candidates.append(
                             {"versionId": row["version_id"], "links": links}
                         )
-                    break
+        candidates = list({c["versionId"]: c for c in candidates}.values())
         rankings = {}
         for region in ("whole", *models):
             if region in rankings:

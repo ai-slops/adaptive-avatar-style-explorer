@@ -21,7 +21,13 @@ class Assets:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    def import_image(self, principal, project, content):
+    def import_image(
+        self, principal, project, content, *, parent_asset_id=None, crop=None
+    ):
+        with self.service.database.connect() as db:
+            self.service.owned(db, principal, project)
+            if parent_asset_id:
+                self.service.get(db, "assets", project, "asset_id", parent_asset_id)
         require(0 < len(content) <= MAX_BYTES, "Image must be at most 20 MiB", 413)
         try:
             with warnings.catch_warnings():
@@ -66,8 +72,8 @@ class Assets:
         with self.service.database.connect() as db:
             self.service.owned(db, principal, project)
             existing = db.execute(
-                "SELECT asset_id FROM assets WHERE project_id=? AND digest=? AND parent_asset_id IS NULL",
-                (project, sha),
+                "SELECT asset_id FROM assets WHERE project_id=? AND digest=? AND parent_asset_id IS ? AND json_extract(provenance_json, '$.crop') IS ?",
+                (project, sha, parent_asset_id, canonical(crop) if crop else None),
             ).fetchone()
             if existing:
                 return {"assetId": existing[0], "deduplicated": True}
@@ -96,10 +102,13 @@ class Assets:
                         else "image/webp",
                         width,
                         height,
-                        None,
+                        parent_asset_id,
                         canonical(
                             {
-                                "kind": "immutable_import",
+                                "kind": "user_selected_crop"
+                                if parent_asset_id
+                                else "immutable_import",
+                                "crop": crop,
                                 "pixelHash": pixel_hash,
                                 "displayDerivativeHash": hashlib.sha256(
                                     output.getvalue()
@@ -125,3 +134,29 @@ class Assets:
             self.service.owned(db, principal, project)
             row = self.service.get(db, "assets", project, "asset_id", asset)
             return self.root / f"{row['storage_key']}.png"
+
+    def crop(self, principal, project, asset_id, coordinates):
+        with self.service.database.connect() as db:
+            self.service.owned(db, principal, project)
+            parent = self.service.get(db, "assets", project, "asset_id", asset_id)
+            x, y, width, height = (
+                coordinates[k] for k in ("x", "y", "width", "height")
+            )
+            require(
+                x + width <= parent["width"] and y + height <= parent["height"],
+                "Crop exceeds the source image bounds",
+            )
+            path = self.root / parent["storage_key"]
+        with Image.open(path) as raw:
+            oriented = ImageOps.exif_transpose(raw)
+            cropped = oriented.crop((x, y, x + width, y + height))
+            cropped.info.clear()
+            output = io.BytesIO()
+            cropped.save(output, format="PNG")
+        return self.import_image(
+            principal,
+            project,
+            output.getvalue(),
+            parent_asset_id=asset_id,
+            crop=coordinates,
+        )

@@ -1392,3 +1392,49 @@ button[aria-pressed="true"] {
     flex-wrap: wrap;
   }
 }
+.crop-canvas {
+  position: relative;
+  max-width: 440px;
+  margin: 20px auto;
+}
+.crop-canvas > img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.crop-canvas > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+.crop-canvas rect {
+  fill: #b4d45522;
+  stroke: #87a737;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.branch-picker {
+  color: #a5bda9;
+  font-size: 9px;
+  margin: 18px 0 -18px;
+}
+.branch-picker select {
+  font-size: 10px;
+}
+
+.codex-generation {
+  border-block: 1px solid var(--line, #d8dcd3);
+  padding-block: 1rem;
+  margin-block: 1rem;
+}
+.generated-preview {
+  display: block;
+  max-width: 100%;
+  width: 24rem;
+  max-height: 32rem;
+  object-fit: contain;
+  margin-block: 1rem;
+}

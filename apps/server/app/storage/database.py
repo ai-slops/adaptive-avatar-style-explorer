@@ -25,7 +25,7 @@ class Database:
                 raise RuntimeError(
                     "Unversioned existing database: back up and migrate separately"
                 )
-            if version not in (0, 2, 3, 4):
+            if version not in (0, 2, 3, 4, 5):
                 raise RuntimeError(
                     "Unsupported database version; back up before migration"
                 )
@@ -33,6 +33,7 @@ class Database:
                 (0, 2, "001_initial.sql"),
                 (2, 3, "002_runtime.sql"),
                 (3, 4, "003_profiles.sql"),
+                (4, 5, "004_codex.sql"),
             ]:
                 if version == source:
                     script = Path(__file__).with_name(filename).read_text()
