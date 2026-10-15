@@ -23,13 +23,11 @@ test("offline design, evidence, prompt and handoff round trip", async ({
   await expect(
     page.getByRole("heading", { name: "What defines this character" }),
   ).toBeVisible();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "reference.png",
-      mimeType: "image/png",
-      buffer: png,
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "reference.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
   await page.getByRole("button", { name: "Review evidence" }).click();
   await page.getByLabel("Observed view").selectOption("front");
   await page.getByLabel("Observed framing").selectOption("full_body");
@@ -77,6 +75,134 @@ test("offline design, evidence, prompt and handoff round trip", async ({
   ).toBe(true);
   await page.screenshot({
     path: "/tmp/style-explorer-mobile.png",
+    fullPage: true,
+  });
+});
+
+test("matched visual comparison records only the shown scoped evidence", async ({
+  page,
+}) => {
+  await page.goto("/#launch=browser-test");
+  await page.getByRole("button", { name: "New project", exact: false }).click();
+  await page.getByLabel("Project name").fill("Matched comparison");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  const session = await (await page.request.get("/api/session")).json();
+  const headers = {
+    origin: "http://127.0.0.1:8766",
+    "x-csrf-token": session.csrfToken,
+  };
+  const projects = await (await page.request.get("/api/projects")).json();
+  const project = projects.find(
+    (p: { title: string }) => p.title === "Matched comparison",
+  ).project_id;
+  const base = `/api/projects/${project}`;
+  const ids: string[] = [];
+  for (const [title, amount, color] of [
+    ["Soft hair", 0.2, "#a0b0a0"],
+    ["Full hair", 0.8, "#b08060"],
+  ] as const) {
+    const version = await (
+      await page.request.post(base + "/designs", {
+        headers,
+        data: {
+          title,
+          spec: {
+            morphology: "humanoid",
+            properties: { "hair.color": { value: color, state: "proposed" } },
+          },
+        },
+      })
+    ).json();
+    ids.push(version.version_id);
+    const bytes = await page.evaluate((color) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 16;
+      canvas.height = 24;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 16, 24);
+      return canvas.toDataURL().split(",")[1];
+    }, color);
+    const asset = await (
+      await page.request.post(base + "/assets", {
+        headers,
+        data: Buffer.from(bytes, "base64"),
+      })
+    ).json();
+    const depiction = await (
+      await page.request.post(base + "/depictions", {
+        headers,
+        data: { assetId: asset.assetId },
+      })
+    ).json();
+    const link = await (
+      await page.request.post(base + "/depiction-links", {
+        headers,
+        data: {
+          depictionId: depiction.depictionId,
+          versionId: version.version_id,
+        },
+      })
+    ).json();
+    const state = (await (await page.request.get("/api/projects")).json()).find(
+      (p: { project_id: string }) => p.project_id === project,
+    );
+    const reviewed = await page.request.post(base + "/evidence-reviews", {
+      headers,
+      data: {
+        linkId: link.linkId,
+        status: "compatible",
+        reviewedRegions: ["hair"],
+        observations: [
+          {
+            region: "hair",
+            attributes: {
+              "hair.volume": {
+                value: amount,
+                confidence: 0.9,
+                visibility: "visible",
+              },
+            },
+            observedPresentation: {
+              view: "front",
+              projection: "orthographic",
+              framing: "full_body",
+              poseId: "neutral",
+              expressionId: "neutral",
+            },
+          },
+        ],
+        expectedEventSequence: state.event_sequence,
+      },
+    });
+    expect(reviewed.ok()).toBe(true);
+  }
+  await page.reload();
+  await page.getByRole("button", { name: /02 Compare/ }).click();
+  await page
+    .getByRole("combobox", { name: "Design A", exact: true })
+    .selectOption(ids[0]);
+  await page
+    .getByRole("combobox", { name: "Design B", exact: true })
+    .selectOption(ids[1]);
+  await page.getByRole("button", { name: "Seal this comparison" }).click();
+  await expect(
+    page.getByText(
+      "This matched, scoped comparison can inform visual preference learning.",
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Choose A", exact: true }).click();
+  await expect(
+    page.getByText("Decision saved with the exact evidence shown."),
+  ).toBeVisible();
+  const preferences = await (
+    await page.request.get(base + "/preferences")
+  ).json();
+  expect(preferences.models.hair.effectiveWeight).toBe(1);
+  expect(Object.keys(preferences.models)).toEqual(["hair"]);
+  await page.getByRole("button", { name: /01 Explore designs/ }).click();
+  await page.screenshot({
+    path: "/tmp/style-explorer-board.png",
     fullPage: true,
   });
 });

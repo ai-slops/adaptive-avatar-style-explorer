@@ -16,6 +16,7 @@ from .contracts import (
     VersionInput,
 )
 from .learning.policy import qualify
+from .learning.ranking import rank_cohort
 from .learning.reference import FEATURE_NAMES, family_weights, fit_pairwise
 
 
@@ -155,7 +156,44 @@ class Service:
                 "INSERT INTO evaluation_profiles VALUES (?,?,?)",
                 (project, "structure-v1", canonical(profile)),
             )
+            db.execute(
+                "INSERT INTO evaluation_profiles VALUES (?,?,?)",
+                (
+                    project,
+                    "unconfigured-v1",
+                    canonical(
+                        {"schemaVersion": "2.0", "stage": "unconfigured", "slots": []}
+                    ),
+                ),
+            )
             return self.owned(db, principal, project)
+
+    def profile(self, db, project, version_id):
+        original = self.version(db, project, version_id)
+        version = original
+        while version:
+            row = db.execute(
+                "SELECT profile_id FROM version_profiles WHERE project_id=? AND version_id=?",
+                (project, version["version_id"]),
+            ).fetchone()
+            if row:
+                return self.get(
+                    db, "evaluation_profiles", project, "profile_id", row[0]
+                )
+            if not version["parent_version_id"]:
+                break
+            version = self.version(db, project, version["parent_version_id"])
+            if version["spec"]["morphology"] != original["spec"]["morphology"]:
+                break
+        return self.get(
+            db,
+            "evaluation_profiles",
+            project,
+            "profile_id",
+            "structure-v1"
+            if original["spec"]["morphology"] == "humanoid"
+            else "unconfigured-v1",
+        )
 
     def validate_sources(self, db, project, spec):
         for prop in spec["properties"].values():
@@ -217,10 +255,10 @@ class Service:
                 "No design change: import a new depiction instead",
             )
             locks = self.reduce(db, project, lineage["branch_id"])["locks"]
-            for key in locks.get(data.parentVersionId, []):
+            for key in self.inherited_locks(db, project, data.parentVersionId, locks):
                 require(
-                    spec["properties"].get(key)
-                    == parent["spec"]["properties"].get(key),
+                    spec["properties"].get(key, {}).get("value")
+                    == parent["spec"]["properties"].get(key, {}).get("value"),
                     f"Unlock {key} explicitly before changing it",
                     409,
                 )
@@ -243,6 +281,24 @@ class Service:
                     "versionId": version,
                     "parentVersionId": data.parentVersionId,
                     "changes": changes,
+                    "changeSet": {
+                        **{
+                            key: {
+                                "before": parent["spec"]["properties"].get(key),
+                                "after": spec["properties"].get(key),
+                            }
+                            for key in changes
+                        },
+                        **{
+                            key: {"before": parent["spec"][key], "after": spec[key]}
+                            for key in (
+                                "morphology",
+                                "componentRelations",
+                                "unresolvedDecisions",
+                            )
+                            if parent["spec"][key] != spec[key]
+                        },
+                    },
                     "reason": data.reason,
                 },
                 "design_intent",
@@ -262,9 +318,10 @@ class Service:
             )
             return self.version(db, project, version)
 
-    def designs(self, principal, project):
+    def designs(self, principal, project, branch_id="main"):
         with self.database.connect() as db:
             self.owned(db, principal, project)
+            branch = self.get(db, "branches", project, "branch_id", branch_id)
             result = []
             for row in db.execute(
                 "SELECT * FROM designs WHERE project_id=? ORDER BY rowid", (project,)
@@ -277,7 +334,15 @@ class Service:
                         (project, row["design_id"]),
                     )
                 ]
-                result.append(design)
+                design["versions"] = [
+                    v
+                    for v in design["versions"]
+                    if self.visible_in_branch(
+                        db, project, branch, design["branch_id"], v["created_sequence"]
+                    )
+                ]
+                if design["versions"]:
+                    result.append(design)
             return result
 
     def create_depiction(self, principal, project, data: DepictionInput):
@@ -315,7 +380,15 @@ class Service:
                     ),
                 ),
             )
-            return {"depictionId": depiction}
+            event = self.append(
+                db,
+                project,
+                "main",
+                "correct_evidence",
+                {"kind": "depiction_imported", "depictionId": depiction},
+                "evidence_review",
+            )
+            return {"depictionId": depiction, **event}
 
     def create_link(self, principal, project, data: LinkInput):
         with self.database.connect() as db:
@@ -349,7 +422,21 @@ class Service:
                     None,
                 ),
             )
-            return {"linkId": link}
+            version = self.version(db, project, data.versionId)
+            design = self.get(db, "designs", project, "design_id", version["design_id"])
+            event = self.append(
+                db,
+                project,
+                design["branch_id"],
+                "correct_evidence",
+                {
+                    "kind": "depiction_associated",
+                    "linkId": link,
+                    "versionId": data.versionId,
+                },
+                "evidence_review",
+            )
+            return {"linkId": link, **event}
 
     def evidence_review(self, principal, project, data: EvidenceReviewInput):
         with self.database.connect() as db:
@@ -444,7 +531,7 @@ class Service:
         findings = [
             json.loads(r[0])
             for r in db.execute(
-                "SELECT details_json FROM findings WHERE project_id=? AND link_id=? AND state='open'",
+                "SELECT details_json FROM findings WHERE project_id=? AND link_id=? AND state IN ('open','accepted_tradeoff')",
                 (project, link["link_id"]),
             )
         ]
@@ -460,41 +547,70 @@ class Service:
                 continue
             if any(
                 f["severity"] == "blocking"
-                and f["region"] in ("whole", obs["region"], region)
+                and (
+                    f["region"] in ("whole", obs["region"], region)
+                    or obs["region"] == "whole"
+                    or region == "whole"
+                )
                 for f in findings
             ):
                 continue
             result.append(obs)
         return result
 
+    def source_family(self, db, project, link_id):
+        link = self.get(db, "depiction_links", project, "link_id", link_id)
+        depiction = self.get(
+            db, "depictions", project, "depiction_id", link["depiction_id"]
+        )
+        asset = self.get(db, "assets", project, "asset_id", depiction["asset_id"])
+        while asset["parent_asset_id"]:
+            asset = self.get(
+                db, "assets", project, "asset_id", asset["parent_asset_id"]
+            )
+        return json.loads(asset["provenance_json"]).get("pixelHash", asset["digest"])
+
     def evidence(self, principal, project, version):
         with self.database.connect() as db:
             self.owned(db, principal, project)
             spec = self.version(db, project, version)
             links = self.current_links(db, project, version)
-            profile = json.loads(
-                self.get(
-                    db, "evaluation_profiles", project, "profile_id", "structure-v1"
-                )["profile_json"]
-            )
-            # Until a morphology-specific profile is configured, no humanoid assumptions.
-            slots = profile["slots"] if spec["spec"]["morphology"] == "humanoid" else []
+            profile_record = self.profile(db, project, version)
+            profile = json.loads(profile_record["profile_json"])
+            slots = profile["slots"]
             coverage = []
+            used_sources = set()
             for slot in slots:
-                status, matching = "missing", []
+                status, matching = (
+                    (
+                        "not_applicable"
+                        if slot.get("notApplicableReason")
+                        else "missing"
+                    ),
+                    [],
+                )
                 for link in links:
+                    source = self.source_family(db, project, link["link_id"])
+                    if source in used_sources:
+                        continue
+                    if status == "not_applicable":
+                        continue
                     if (
                         "whole"
                         not in json.loads(link["assessment_json"])["reviewedRegions"]
+                        and slot.get("region", "whole")
+                        not in json.loads(link["assessment_json"])["reviewedRegions"]
                     ):
                         continue
-                    for obs in self.link_observations(db, project, link, "whole"):
+                    for obs in self.link_observations(
+                        db, project, link, slot.get("region", "whole")
+                    ):
                         p = obs["observedPresentation"]
                         if (
                             p["view"] == slot["view"]
                             and p["framing"] == slot["framing"]
-                            and p["poseId"] == "neutral"
-                            and p["expressionId"] == "neutral"
+                            and p["poseId"] == slot.get("poseId", "neutral")
+                            and p["expressionId"] == slot.get("expressionId", "neutral")
                         ):
                             depiction = self.get(
                                 db,
@@ -508,10 +624,14 @@ class Service:
                                 status = "user_reported_model_evidence"
                             elif status != "user_reported_model_evidence":
                                 status = "usable_concept_evidence"
+                if matching:
+                    used_sources.add(self.source_family(db, project, matching[0]))
                 coverage.append(
                     {**slot, "status": status, "linkIds": sorted(set(matching))}
                 )
-            required = [s for s in coverage if s["required"]]
+            required = [
+                s for s in coverage if s["required"] and s["status"] != "not_applicable"
+            ]
             for link in links:
                 link["depiction"] = self.get(
                     db, "depictions", project, "depiction_id", link["depiction_id"]
@@ -535,7 +655,13 @@ class Service:
                 "version": spec,
                 "links": links,
                 "slots": coverage,
-                "referenceCoverage": sum(s["status"] != "missing" for s in required)
+                "evaluationProfileId": profile_record["profile_id"],
+                "evaluationProfile": profile,
+                "referenceCoverage": sum(
+                    s["status"]
+                    in ("usable_concept_evidence", "user_reported_model_evidence")
+                    for s in required
+                )
                 / len(required)
                 if required
                 else None,
@@ -569,7 +695,7 @@ class Service:
                 project,
                 bundle,
                 version,
-                "structure-v1",
+                self.profile(db, project, version)["profile_id"],
                 sequence,
                 digest(payload),
                 canonical(payload),
@@ -624,6 +750,28 @@ class Service:
                 **qualify(oa, ob, data.region, data.domain),
                 "domain": data.domain,
             }
+            if data.domain == "visual_design" and {
+                self.source_family(db, project, link) for link in data.linkIdsA
+            } & {self.source_family(db, project, link) for link in data.linkIdsB}:
+                qualification["eligible"] = False
+                qualification["reasons"].append(
+                    "The two sides share an original image source; conflicting feature entries are not independent design evidence"
+                )
+            prior = self._preferences(db, project, data.branchId)["models"].get(
+                data.region
+            )
+            prediction = None
+            if qualification["eligible"] and prior and prior["state"] == "fitted":
+                logit = float(
+                    np.array(prior["coefficients"])
+                    @ np.array(qualification["difference"])
+                )
+                prediction = {
+                    "probabilityA": float(np.exp(-np.logaddexp(0, -logit))),
+                    "supportingEventIds": prior["eventIds"],
+                    "recordedBeforeFeedback": True,
+                }
+            qualification["preFeedbackPrediction"] = prediction
             review = uid()
             db.execute(
                 "INSERT INTO review_sessions VALUES (?,?,?,?,?,?)",
@@ -679,6 +827,13 @@ class Service:
         ]
         return inherited + local
 
+    def inherited_locks(self, db, project, version_id, locks):
+        result = set()
+        while version_id:
+            result.update(locks.get(version_id, []))
+            version_id = self.version(db, project, version_id)["parent_version_id"]
+        return sorted(result)
+
     def reduce(self, db, project, branch_id):
         history = self.history(db, project, branch_id)
         undone = {e["target_event_id"] for e in history if e["action"] == "undo"}
@@ -698,10 +853,22 @@ class Service:
                 shortlist.discard(v)
                 if action == "reject_design":
                     rejected.add(v)
+            elif action == "adopt_variant":
+                version_id = p.get("versionId")
+                if version_id:
+                    published = self.version(db, project, version_id)
+                    for key, prop in published["spec"]["properties"].items():
+                        if prop["state"] == "user_confirmed":
+                            locks.setdefault(version_id, set()).add(key)
             elif action == "lock_property":
                 locks.setdefault(v, set()).add(p["propertyKey"])
             elif action == "unlock_property":
-                locks.setdefault(v, set()).discard(p["propertyKey"])
+                version_id = v
+                while version_id:
+                    locks.setdefault(version_id, set()).discard(p["propertyKey"])
+                    version_id = self.version(db, project, version_id)[
+                        "parent_version_id"
+                    ]
             elif action == "reset":
                 epoch += 1
                 comparisons = []
@@ -716,6 +883,20 @@ class Service:
             "epoch": epoch,
             "comparisons": comparisons,
             "activeEventIds": [e["event_id"] for e in active],
+            "undoableEvents": [
+                {"eventId": e["event_id"], "action": e["action"]}
+                for e in active
+                if e["action"]
+                in (
+                    "compare",
+                    "shortlist_add",
+                    "shortlist_remove",
+                    "reject_design",
+                    "lock_property",
+                    "unlock_property",
+                    "reset",
+                )
+            ],
         }
 
     def feedback(self, principal, project, data: FeedbackInput):
@@ -857,79 +1038,144 @@ class Service:
     def preferences(self, principal, project, branch_id="main"):
         with self.database.connect() as db:
             self.owned(db, principal, project)
-            state = self.reduce(db, project, branch_id)
-            rows = []
-            for event in state.pop("comparisons"):
-                payload = json.loads(event["payload_json"])
-                if payload["outcome"] not in ("A", "B", "tie"):
-                    continue
-                review = self.get(
-                    db, "review_sessions", project, "review_id", event["review_id"]
+            return self._preferences(db, project, branch_id)
+
+    def _preferences(self, db, project, branch_id):
+        state = self.reduce(db, project, branch_id)
+        raw_locks = state["locks"]
+        state["locks"] = {
+            row[0]: self.inherited_locks(db, project, row[0], raw_locks)
+            for row in db.execute(
+                "SELECT version_id FROM design_versions WHERE project_id=?",
+                (project,),
+            )
+        }
+        rows = []
+        for event in state.pop("comparisons"):
+            payload = json.loads(event["payload_json"])
+            if payload["outcome"] not in ("A", "B", "tie"):
+                continue
+            review = self.get(
+                db, "review_sessions", project, "review_id", event["review_id"]
+            )
+            q = json.loads(review["qualification_json"])
+            if not q["eligible"]:
+                continue
+            sides = list(
+                db.execute(
+                    "SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side",
+                    (project, event["review_id"]),
                 )
-                q = json.loads(review["qualification_json"])
-                if not q["eligible"]:
-                    continue
-                sides = list(
-                    db.execute(
-                        "SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side",
-                        (project, event["review_id"]),
-                    )
+            )
+            invalidated = False
+            for side in sides:
+                bundle = self.get(
+                    db, "evidence_bundles", project, "bundle_id", side["bundle_id"]
                 )
-                invalidated = False
-                for side in sides:
-                    bundle = self.get(
-                        db, "evidence_bundles", project, "bundle_id", side["bundle_id"]
-                    )
-                    for item in json.loads(bundle["frozen_json"])["items"]:
-                        # A later correction never rewrites exposure. Conservatively retire that row.
-                        if db.execute(
-                            "SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?",
-                            (project, item["link"]["link_id"]),
-                        ).fetchone():
-                            invalidated = True
-                if invalidated:
-                    continue
-                # Canonical orientation makes A/B reversal share one family and consistent vectors.
-                versions = [s["version_id"] for s in sides]
-                delta = np.array(q["difference"])
-                target = {"A": 1.0, "B": 0.0, "tie": 0.5}[payload["outcome"]]
-                if versions[0] > versions[1]:
-                    delta, target = -delta, 1 - target
-                rows.append(
+                for item in json.loads(bundle["frozen_json"])["items"]:
+                    # A later correction never rewrites exposure. Conservatively retire that row.
+                    if db.execute(
+                        "SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?",
+                        (project, item["link"]["link_id"]),
+                    ).fetchone():
+                        invalidated = True
+            if invalidated:
+                continue
+            # Canonical orientation makes A/B reversal share one family and consistent vectors.
+            versions = [s["version_id"] for s in sides]
+            delta = np.array(q["difference"])
+            target = {"A": 1.0, "B": 0.0, "tie": 0.5}[payload["outcome"]]
+            if versions[0] > versions[1]:
+                delta, target = -delta, 1 - target
+            rows.append(
+                {
+                    "region": review["region"],
+                    "delta": delta,
+                    "target": target,
+                    "weight": 0.5 if payload["outcome"] == "tie" else 1.0,
+                    "family": canonical(
+                        [sorted(versions), state["epoch"], review["region"]]
+                    ),
+                    "eventId": event["event_id"],
+                }
+            )
+        models = {}
+        for region in sorted({r["region"] for r in rows}):
+            group = [r for r in rows if r["region"] == region]
+            weights = family_weights(
+                [r["family"] for r in group], np.array([r["weight"] for r in group])
+            )
+            model = fit_pairwise(
+                np.array([r["delta"] for r in group]),
+                np.array([r["target"] for r in group]),
+                weights,
+            )
+            models[region] = {
+                "state": "fitted" if model.converged else "insufficient_evidence",
+                "coefficients": model.coefficients.tolist()
+                if model.converged
+                else None,
+                "hessian": model.hessian.tolist() if model.converged else None,
+                "effectiveWeight": model.effective_weight,
+                "eventIds": [r["eventId"] for r in group],
+                "featureNames": list(FEATURE_NAMES),
+            }
+        branch = self.get(db, "branches", project, "branch_id", branch_id)
+        candidates = []
+        for design in db.execute(
+            "SELECT * FROM designs WHERE project_id=? ORDER BY rowid", (project,)
+        ):
+            for row in db.execute(
+                "SELECT * FROM design_versions WHERE project_id=? AND design_id=? ORDER BY revision DESC",
+                (project, design["design_id"]),
+            ):
+                if self.visible_in_branch(
+                    db, project, branch, design["branch_id"], row["created_sequence"]
+                ):
+                    if row["version_id"] not in state["rejected"]:
+                        links = self.current_links(db, project, row["version_id"])
+                        candidates.append(
+                            {"versionId": row["version_id"], "links": links}
+                        )
+                    break
+        rankings = {}
+        for region in ("whole", *models):
+            if region in rankings:
+                continue
+            observations = [
+                {
+                    "versionId": c["versionId"],
+                    "sourceFamilies": [
+                        self.source_family(db, project, l["link_id"])
+                        for l in c["links"]
+                    ],
+                    "observations": [
+                        o
+                        for l in c["links"]
+                        for o in self.link_observations(db, project, l, region)
+                    ],
+                }
+                for c in candidates
+            ]
+            rankings[region] = rank_cohort(observations, models.get(region), region)
+        disagreements = []
+        for family in {r["family"] for r in rows}:
+            group = [r for r in rows if r["family"] == family]
+            if any(r["target"] > 0.5 for r in group) and any(
+                r["target"] < 0.5 for r in group
+            ):
+                disagreements.append(
                     {
-                        "region": review["region"],
-                        "delta": delta,
-                        "target": target,
-                        "weight": 0.5 if payload["outcome"] == "tie" else 1.0,
-                        "family": canonical(
-                            [sorted(versions), state["epoch"], review["region"]]
-                        ),
-                        "eventId": event["event_id"],
+                        "eventIds": [r["eventId"] for r in group],
+                        "region": group[0]["region"],
+                        "message": "Choices differ across repeated contexts. Review the frozen evidence before generalizing.",
                     }
                 )
-            models = {}
-            for region in sorted({r["region"] for r in rows}):
-                group = [r for r in rows if r["region"] == region]
-                weights = family_weights(
-                    [r["family"] for r in group], np.array([r["weight"] for r in group])
-                )
-                model = fit_pairwise(
-                    np.array([r["delta"] for r in group]),
-                    np.array([r["target"] for r in group]),
-                    weights,
-                )
-                models[region] = {
-                    "state": "fitted" if model.converged else "insufficient_evidence",
-                    "coefficients": model.coefficients.tolist()
-                    if model.converged
-                    else None,
-                    "effectiveWeight": model.effective_weight,
-                    "eventIds": [r["eventId"] for r in group],
-                    "featureNames": list(FEATURE_NAMES),
-                }
-            return {
-                **state,
-                "models": models,
-                "state": "fitted" if models else "insufficient_evidence",
-                "limitations": "Region models are separate. No universal ranking without a common observed feature basis. Numerical convergence is not preference certainty.",
-            }
+        return {
+            **state,
+            "models": models,
+            "rankings": rankings,
+            "contextualDisagreements": disagreements,
+            "state": "fitted" if models else "insufficient_evidence",
+            "limitations": "Region models are separate. No universal ranking without a common observed feature basis. Numerical convergence is not preference certainty.",
+        }

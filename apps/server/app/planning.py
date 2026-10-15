@@ -26,15 +26,8 @@ class Planning:
             version = s.version(db, project, data.targetVersionId)
             spec = version["spec"]
             design = s.get(db, "designs", project, "design_id", version["design_id"])
-            explicit_locks = s.reduce(db, project, design["branch_id"])["locks"].get(
-                data.targetVersionId, []
-            )
-            confirmed = [
-                key
-                for key, prop in spec["properties"].items()
-                if prop["state"] == "user_confirmed"
-            ]
-            locked = sorted(set(explicit_locks + confirmed))
+            lock_state = s.reduce(db, project, design["branch_id"])["locks"]
+            locked = s.inherited_locks(db, project, data.targetVersionId, lock_state)
             require(
                 not set(data.changeDesignProperties) & set(locked),
                 "Explicitly unlock preserved properties before proposing changes",
@@ -255,6 +248,23 @@ class Planning:
                         }
                     ),
                 ),
+            )
+            version = self.service.version(db, project, data.targetVersionId)
+            design = self.service.get(
+                db, "designs", project, "design_id", version["design_id"]
+            )
+            self.service.append(
+                db,
+                project,
+                design["branch_id"],
+                "correct_evidence",
+                {
+                    "kind": "model_build_registered",
+                    "buildId": build,
+                    "versionId": data.targetVersionId,
+                    "provenanceLevel": "user_reported",
+                },
+                "evidence_review",
             )
             return {
                 "buildId": build,

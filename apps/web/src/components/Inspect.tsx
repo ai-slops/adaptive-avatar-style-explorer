@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   Version,
   Evidence,
@@ -6,9 +6,12 @@ import type {
   Plan,
   Preferences,
   Link,
+  ModelBuild,
 } from "../types";
 import { image, human } from "../ui";
 import { api } from "../api";
+import { ProfileEditor } from "./ProfileEditor";
+import { FindingDisposition } from "./FindingDisposition";
 import { EvidenceEditor } from "./EvidenceEditor";
 export function Inspect({
   version,
@@ -35,9 +38,24 @@ export function Inspect({
     e?: Record<string, unknown>,
   ) => Promise<void>;
 }) {
+  const [profileEditor, setProfileEditor] = useState(false);
   const [reviewing, setReviewing] = useState<Link | null>(null),
     [importPlan, setImportPlan] = useState(""),
     [exportPermission, setExportPermission] = useState(false);
+  const [builds, setBuilds] = useState<ModelBuild[]>([]),
+    [sourceBuild, setSourceBuild] = useState("");
+  useEffect(() => {
+    setSourceBuild("");
+    void run(async () =>
+      setBuilds(
+        (
+          await api<ModelBuild[]>(
+            `/projects/${project.project_id}/model-builds`,
+          )
+        ).filter((b) => b.target_version_id === version.version_id),
+      ),
+    );
+  }, [version.version_id]);
   return (
     <>
       <div className="inspect-grid">
@@ -94,7 +112,12 @@ export function Inspect({
           </details>
         </section>
         <section className="paper-panel">
-          <h2>Reference coverage</h2>
+          <div className="section-heading">
+            <h2>Reference coverage</h2>
+            <button onClick={() => setProfileEditor(true)}>
+              Edit evaluation plan
+            </button>
+          </div>
           <p className="metric">
             {evidence.referenceCoverage === null
               ? "—"
@@ -110,7 +133,11 @@ export function Inspect({
                 </small>
               </span>
               <span className={slot.status === "missing" ? "missing" : "good"}>
-                {slot.status === "missing" ? "○ Missing" : "✓ Reviewed"}
+                {slot.status === "missing"
+                  ? "○ Missing"
+                  : slot.status === "not_applicable"
+                    ? "— Not applicable"
+                    : "✓ Reviewed"}
               </span>
             </div>
           ))}
@@ -122,6 +149,25 @@ export function Inspect({
           )}
         </section>
       </div>
+      {builds.length > 0 && (
+        <label className="version-selector">
+          Import a capture from a reported model build
+          <select
+            value={sourceBuild}
+            onChange={(e) => {
+              setSourceBuild(e.target.value);
+              setImportPlan("");
+            }}
+          >
+            <option value="">Concept / independent reference</option>
+            {builds.map((b) => (
+              <option key={b.build_id} value={b.build_id}>
+                {JSON.parse(b.report_json).label} · user reported
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <section className="paper-panel import-panel">
         <div>
           <h2>Bring in real evidence.</h2>
@@ -134,6 +180,7 @@ export function Inspect({
           Result belongs to
           <select
             value={importPlan}
+            disabled={!!sourceBuild}
             onChange={(e) => setImportPlan(e.target.value)}
           >
             <option value="">Unassociated reference / inspiration</option>
@@ -173,7 +220,12 @@ export function Inspect({
                   base + "/external-results",
                   {
                     assetId: a.assetId,
-                    sourceKind: plan ? "external_result" : "reference",
+                    sourceKind: sourceBuild
+                      ? "model_capture_user_reported"
+                      : plan
+                        ? "external_result"
+                        : "reference",
+                    sourceBuildId: sourceBuild || null,
                     originPlanId: plan?.planId ?? null,
                     originPromptRevision: plan?.revision ?? null,
                     explicitlyUnassociated: !plan,
@@ -221,12 +273,13 @@ export function Inspect({
         <section className="paper-panel">
           <h2>Findings & open questions</h2>
           {evidence.findings.map((f) => (
-            <div className="finding" key={f.finding_id}>
-              <span>
-                {human(f.kind)} · {human(f.state)}
-              </span>
-              <p>{JSON.parse(f.details_json).description}</p>
-            </div>
+            <FindingDisposition
+              key={f.finding_id}
+              finding={f}
+              project={project}
+              run={run}
+              refresh={refresh}
+            />
           ))}
         </section>
       )}
@@ -238,14 +291,12 @@ export function Inspect({
         >
           Not my design
         </button>
-        {preferences?.activeEventIds.length ? (
+        {preferences?.undoableEvents.length ? (
           <button
             onClick={() =>
               void run(() =>
                 feedback("undo", undefined, {
-                  targetEventId: [...preferences.activeEventIds]
-                    .reverse()
-                    .find(() => true),
+                  targetEventId: preferences.undoableEvents.at(-1)?.eventId,
                 }),
               )
             }
@@ -254,6 +305,15 @@ export function Inspect({
           </button>
         ) : null}
       </div>
+      {profileEditor && (
+        <ProfileEditor
+          evidence={evidence}
+          project={project}
+          onClose={() => setProfileEditor(false)}
+          onSaved={refresh}
+          run={run}
+        />
+      )}
       {reviewing && (
         <EvidenceEditor
           link={reviewing}

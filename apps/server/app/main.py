@@ -24,9 +24,11 @@ from .contracts import (
     ConsentInput,
     DepictionInput,
     DesignInput,
+    EvaluationProfileInput,
     EvidenceReviewInput,
     ExportInput,
     FeedbackInput,
+    FindingResolutionInput,
     JobInput,
     LinkInput,
     ModelBuildInput,
@@ -36,10 +38,12 @@ from .contracts import (
     Strict,
     VersionInput,
 )
+from .evaluation import Evaluation
 from .exports import Exports
 from .jobs import Jobs
 from .planning import Planning
 from .providers.siwc import SIWC
+from .quality import quality_report
 from .service import Service
 from .storage.assets import MAX_BYTES, Assets
 from .storage.database import Database
@@ -64,6 +68,7 @@ def create_app(
     service = Service(Database(root / "workspace.sqlite"))
     assets = Assets(service, root / "assets")
     planning = Planning(service)
+    evaluation = Evaluation(service)
     exports = Exports(service, assets, planning)
     secret = bootstrap_secret or secrets.token_urlsafe(32)
     profile_path = root / "offline-profile"
@@ -353,8 +358,8 @@ def create_app(
         return service.create_project(request.state.principal, data.title)
 
     @app.get("/api/projects/{p}/designs")
-    def designs(p: str, request: Request):
-        return service.designs(request.state.principal, p)
+    def designs(p: str, request: Request, branchId: str = "main"):
+        return service.designs(request.state.principal, p, branchId)
 
     @app.post("/api/projects/{p}/designs")
     def create_design(p: str, data: DesignInput, request: Request):
@@ -397,6 +402,62 @@ def create_app(
     def evidence(p: str, v: str, request: Request):
         return service.evidence(request.state.principal, p, v)
 
+    @app.post("/api/projects/{p}/evaluation-profiles")
+    def evaluation_profile(p: str, data: EvaluationProfileInput, request: Request):
+        return evaluation.publish_profile(request.state.principal, p, data)
+
+    @app.post("/api/projects/{p}/findings/{f}/disposition")
+    def finding_disposition(
+        p: str, f: str, data: FindingResolutionInput, request: Request
+    ):
+        return evaluation.resolve(request.state.principal, p, f, data)
+
+    @app.get("/api/projects/{p}/events")
+    def events(p: str, request: Request, branchId: str = "main"):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            state = service.reduce(db, p, branchId)
+            import json
+
+            return [
+                {
+                    **dict(e),
+                    "payload": json.loads(e["payload_json"]),
+                    "effective": e["event_id"] in state["activeEventIds"],
+                }
+                for e in service.history(db, p, branchId)
+            ]
+
+    @app.get("/api/projects/{p}/review-sessions/{r}")
+    def frozen_review(p: str, r: str, request: Request):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            row = service.get(db, "review_sessions", p, "review_id", r)
+            import json
+
+            sides = []
+            for item in db.execute(
+                "SELECT * FROM review_items WHERE project_id=? AND review_id=? ORDER BY side",
+                (p, r),
+            ):
+                bundle = service.get(
+                    db, "evidence_bundles", p, "bundle_id", item["bundle_id"]
+                )
+                sides.append(
+                    {
+                        "side": item["side"],
+                        "version": service.version(db, p, item["version_id"]),
+                        "bundle": json.loads(bundle["frozen_json"]),
+                        "evidenceHash": bundle["evidence_hash"],
+                    }
+                )
+            return {
+                "reviewSessionId": r,
+                "region": row["region"],
+                "qualification": json.loads(row["qualification_json"]),
+                "sides": sides,
+            }
+
     @app.post("/api/projects/{p}/review-sessions")
     def review(p: str, data: ReviewInput, request: Request):
         return service.review(request.state.principal, p, data)
@@ -409,6 +470,12 @@ def create_app(
     def preferences(p: str, request: Request, branchId: str = "main"):
         return service.preferences(request.state.principal, p, branchId)
 
+    @app.get("/api/projects/{p}/preference-evaluation")
+    def preference_evaluation(p: str, request: Request, branchId: str = "main"):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            return quality_report(service, db, p, branchId)
+
     @app.post("/api/projects/{p}/next-actions")
     def next_actions(p: str, data: NextInput, request: Request):
         return planning.next_actions(request.state.principal, p, data.versionId)
@@ -420,6 +487,18 @@ def create_app(
     @app.post("/api/projects/{p}/prompt-packs")
     def plan(p: str, data: PlanInput, request: Request):
         return planning.compile(request.state.principal, p, data)
+
+    @app.get("/api/projects/{p}/model-builds")
+    def model_builds(p: str, request: Request):
+        with service.database.connect() as db:
+            service.owned(db, request.state.principal, p)
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM model_builds WHERE project_id=? ORDER BY rowid DESC",
+                    (p,),
+                )
+            ]
 
     @app.post("/api/projects/{p}/model-builds")
     def model_build(p: str, data: ModelBuildInput, request: Request):

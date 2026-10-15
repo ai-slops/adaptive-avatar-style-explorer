@@ -43,9 +43,9 @@ def design(s, p, value="silver", branch="main"):
     )
 
 
-def image_bytes():
+def image_bytes(color="white"):
     data = io.BytesIO()
-    Image.new("RGB", (16, 24), "white").save(data, "PNG")
+    Image.new("RGB", (16, 24), color).save(data, "PNG")
     return data.getvalue()
 
 
@@ -60,7 +60,9 @@ def evidence(
     status="compatible",
     findings=None,
 ):
-    asset = Assets(s, tmp).import_image("alice", p, image_bytes())["assetId"]
+    asset = Assets(s, tmp).import_image(
+        "alice", p, image_bytes((int(amount * 200) + 20, 100, 100))
+    )["assetId"]
     depiction = s.create_depiction("alice", p, DepictionInput(assetId=asset))[
         "depictionId"
     ]
@@ -510,3 +512,110 @@ def test_nonhumanoid_profile_not_invented(service, project):
     )
     result = service.evidence("alice", project, v["version_id"])
     assert result["referenceCoverage"] is None and result["slots"] == []
+
+
+def test_preserved_properties_propagate_and_require_explicit_unlock(service, project):
+    original = design(service, project)
+    service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="lock_property",
+            subjectVersionIds=[original["version_id"]],
+            propertyKey="hair.color",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )
+    spec = CanonicalInput.model_validate(original["spec"])
+    spec.properties["outfit.layer"] = Property(value="cape", state="proposed")
+    child = service.new_version(
+        "alice",
+        project,
+        original["design_id"],
+        VersionInput(
+            parentVersionId=original["version_id"],
+            spec=spec,
+            reason="Add a cape",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )
+    assert (
+        "hair.color"
+        in service.preferences("alice", project)["locks"][child["version_id"]]
+    )
+    spec.properties["hair.color"] = Property(value="gold", state="proposed")
+    data = VersionInput(
+        parentVersionId=child["version_id"],
+        spec=spec,
+        reason="Revise hair",
+        expectedEventSequence=sequence(service, project),
+    )
+    with pytest.raises(DomainError, match="Unlock"):
+        service.new_version("alice", project, original["design_id"], data)
+    service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="unlock_property",
+            subjectVersionIds=[child["version_id"]],
+            propertyKey="hair.color",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )
+    updated = service.new_version(
+        "alice",
+        project,
+        original["design_id"],
+        data.model_copy(update={"expectedEventSequence": sequence(service, project)}),
+    )
+    assert updated["revision"] == 3
+
+
+def test_confirmed_intent_becomes_user_lock(service, project):
+    original = service.create_design(
+        "alice",
+        project,
+        DesignInput(
+            title="Confirmed",
+            spec=CanonicalInput(
+                properties={
+                    "accessory.side": Property(
+                        value="character-left", state="user_confirmed"
+                    )
+                }
+            ),
+        ),
+    )
+    assert service.preferences("alice", project)["locks"][original["version_id"]] == [
+        "accessory.side"
+    ]
+
+
+def test_predictions_precede_feedback_and_disagreement_is_explicit(
+    service, project, tmp_path
+):
+    from app.quality import quality_report
+
+    a, b = (
+        design(service, project)["version_id"],
+        design(service, project, "gold")["version_id"],
+    )
+    la, lb = (
+        evidence(service, project, a, tmp_path, 0.2),
+        evidence(service, project, b, tmp_path, 0.8),
+    )
+    first, _ = compare(service, project, a, b, la, lb)
+    assert first["qualification"]["preFeedbackPrediction"] is None
+    second, _ = compare(service, project, a, b, la, lb, outcome="B")
+    assert second["qualification"]["preFeedbackPrediction"]["recordedBeforeFeedback"]
+    assert second["qualification"]["preFeedbackPrediction"]["probabilityA"] > 0.5
+    pref = service.preferences("alice", project)
+    assert len(pref["contextualDisagreements"]) == 1
+    assert pref["models"]["hair"]["effectiveWeight"] == 1
+    with service.database.connect() as db:
+        report = quality_report(service, db, project, "main")
+    assert report["allPrequential"]["count"] == 1
+    assert report["heldOutLineageAndExactSource"]["count"] == 0
+    assert report["status"] == "inconclusive_observational_evidence"

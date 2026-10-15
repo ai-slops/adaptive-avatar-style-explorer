@@ -5,6 +5,7 @@ import json
 import zipfile
 
 from .common import canonical
+from .quality import quality_report
 
 CHECKLIST = """# Modeling acceptance checklist
 
@@ -54,6 +55,10 @@ class Exports:
                     db, "designs", project, "design_id", version["design_id"]
                 )
                 effective = s.reduce(db, project, design["branch_id"])
+                json_file(
+                    "preference-evaluation.json",
+                    quality_report(s, db, project, design["branch_id"]),
+                )
                 json_file(
                     "character-spec.json",
                     {"evidenceKind": "canonical_intent", **version},

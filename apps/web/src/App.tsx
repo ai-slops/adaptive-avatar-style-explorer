@@ -15,6 +15,7 @@ import { Inspect } from "./components/Inspect";
 import { Prompts } from "./components/Prompts";
 import { Handoff } from "./components/Handoff";
 import { Account } from "./components/Account";
+import { ReviewHistory } from "./components/ReviewHistory";
 import { Reasoning } from "./components/Reasoning";
 export function App() {
   const [ready, setReady] = useState(false),
@@ -33,6 +34,7 @@ export function App() {
     [editor, setEditor] = useState<Version | null | false>(false);
   const [compareIds, setCompareIds] = useState<string[]>([]),
     [branch, setBranch] = useState("main");
+  const [rankingRegion, setRankingRegion] = useState("whole");
   const project = projects.find((p) => p.project_id === projectId);
   const allVersions = designs.flatMap((d) => d.versions);
   const version = allVersions.find((v) => v.version_id === selected);
@@ -57,7 +59,7 @@ export function App() {
     setProjects(list);
     if (!p) return;
     const [ds, pref, packs] = await Promise.all([
-      api<Design[]>(`/projects/${p}/designs`),
+      api<Design[]>(`/projects/${p}/designs?branchId=${branch}`),
       api<Preferences>(`/projects/${p}/preferences?branchId=${branch}`),
       api<Plan[]>(`/projects/${p}/prompt-packs`),
     ]);
@@ -123,6 +125,14 @@ export function App() {
     .map((d) => d.versions[0])
     .filter((v) => !preferences?.rejected.includes(v.version_id));
 
+  const ranking = preferences?.rankings[rankingRegion];
+  const boardOrder = [
+    ...(ranking?.boardVersionIds ?? []),
+    ...current.map((v) => v.version_id),
+  ];
+  const board = listUnique(boardOrder)
+    .map((id) => current.find((v) => v.version_id === id))
+    .filter((v): v is Version => !!v);
   if (!ready)
     return (
       <main className="launch">
@@ -338,6 +348,28 @@ export function App() {
                       </p>
                     </div>
                   </div>
+                  <div className="ranking-controls">
+                    <label>
+                      Explore a design scope
+                      <select
+                        value={rankingRegion}
+                        onChange={(e) => setRankingRegion(e.target.value)}
+                      >
+                        {Object.keys(
+                          preferences?.rankings ?? { whole: null },
+                        ).map((r) => (
+                          <option key={r} value={r}>
+                            {human(r)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p>
+                      {ranking?.state === "ranked_on_common_basis"
+                        ? `Ordered within a shared basis of ${ranking.basis.length} observed ${human(rankingRegion)} features. Other scopes stay separate.`
+                        : "Not enough common visual evidence to rank this scope. Missing views are evidence requests."}
+                    </p>
+                  </div>
                   <div className="board-toolbar">
                     <span>
                       {current.length} distinct design
@@ -366,7 +398,7 @@ export function App() {
                     </div>
                   ) : (
                     <div className="design-grid">
-                      {current.slice(0, 6).map((v, i) => {
+                      {board.slice(0, 6).map((v, i) => {
                         const ev = evidence[v.version_id],
                           preview =
                             ev?.links.find((l) => l.status === "compatible") ??
@@ -495,6 +527,11 @@ export function App() {
                             )
                             .join(" · ")}
                     </p>
+                    {preferences?.contextualDisagreements.map((d, i) => (
+                      <p className="disagreement" key={i}>
+                        {human(d.region)}: {d.message}
+                      </p>
+                    ))}
                     <div className="inline-actions">
                       <button
                         onClick={() =>
@@ -535,6 +572,14 @@ export function App() {
                       )}
                     </div>
                   </section>
+                  <ReviewHistory
+                    project={project}
+                    branch={branch}
+                    run={run}
+                    onUndo={async (id) => {
+                      await feedback("undo", undefined, { targetEventId: id });
+                    }}
+                  />
                 </>
               )}
               {screen === "compare" && (
@@ -680,4 +725,8 @@ export function App() {
       )}
     </div>
   );
+}
+
+function listUnique(values: string[]) {
+  return [...new Set(values)];
 }

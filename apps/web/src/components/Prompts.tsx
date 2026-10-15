@@ -24,6 +24,14 @@ export function Prompts({
   const [purpose, setPurpose] = useState("additional_view"),
     [view, setView] = useState("character_left_profile"),
     [changes, setChanges] = useState("");
+  const [recipe, setRecipe] = useState({
+    projection: "orthographic",
+    framing: "full_body",
+    poseId: "neutral",
+    expressionId: "neutral",
+    lightingClass: "neutral",
+    backgroundClass: "plain",
+  });
   const packs = plans.filter(
     (p) => p.targetDesignVersionId === version.version_id,
   );
@@ -56,7 +64,7 @@ export function Prompts({
               await api(`/projects/${project.project_id}/prompt-packs`, {
                 targetVersionId: version.version_id,
                 purpose,
-                recipe: { view },
+                recipe: { view, ...recipe },
                 changeDesignProperties: changes.split("\n").filter(Boolean),
                 references,
                 expectedEventSequence: project.event_sequence,
@@ -102,6 +110,63 @@ export function Prompts({
               </select>
             </label>
           </div>
+          <details>
+            <summary>Requested test conditions</summary>
+            <p>
+              These are requests only. Returned images are assessed separately.
+            </p>
+            <div className="inline-inputs">
+              <label>
+                Requested projection
+                <select
+                  value={recipe.projection}
+                  onChange={(e) =>
+                    setRecipe({ ...recipe, projection: e.target.value })
+                  }
+                >
+                  {["orthographic", "perspective", "unknown"].map((x) => (
+                    <option key={x} value={x}>
+                      {human(x)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Requested framing
+                <select
+                  value={recipe.framing}
+                  onChange={(e) =>
+                    setRecipe({ ...recipe, framing: e.target.value })
+                  }
+                >
+                  {["full_body", "upper_body", "face", "detail"].map((x) => (
+                    <option key={x} value={x}>
+                      {human(x)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="inline-inputs">
+              {[
+                ["poseId", "Requested pose"],
+                ["expressionId", "Requested expression"],
+                ["lightingClass", "Requested lighting"],
+                ["backgroundClass", "Requested background"],
+              ].map(([key, label]) => (
+                <label key={key}>
+                  {label}
+                  <input
+                    required
+                    value={recipe[key as keyof typeof recipe]}
+                    onChange={(e) =>
+                      setRecipe({ ...recipe, [key]: e.target.value })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
           {["design_variant", "unspecified_part"].includes(purpose) && (
             <label>
               Properties to propose changes to

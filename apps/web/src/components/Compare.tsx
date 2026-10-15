@@ -46,9 +46,39 @@ export function Compare({
           ),
         ) ?? [],
     );
+  const [selectedLinks, setSelectedLinks] = useState<string[]>([]);
   const chosen = links.map(
-    (ls) => ls.find((l) => l.status === "compatible") ?? ls[0],
+    (ls, i) =>
+      ls.find((l) => l.link_id === selectedLinks[i]) ??
+      ls.find((l) => l.status === "compatible") ??
+      ls[0],
   );
+  const structuralViews = [
+    "front",
+    "character_left_profile",
+    "character_right_profile",
+    "back",
+  ];
+  const wholeLinks = ids.slice(0, 2).map((id) =>
+    structuralViews.map((view) => {
+      const candidates =
+        evidence[id]?.links.filter((l) =>
+          l.observations.some((o) => o.observedPresentation.view === view),
+        ) ?? [];
+      return candidates.find((l) => l.status === "compatible") ?? candidates[0];
+    }),
+  );
+  const exposed = ids
+    .slice(0, 2)
+    .map((_, i) =>
+      intent
+        ? []
+        : region === "whole"
+          ? wholeLinks[i].filter((l) => !!l).map((l) => l.link_id)
+          : chosen[i]
+            ? [chosen[i].link_id]
+            : [],
+    );
   function change(action: () => void) {
     setReview(null);
     action();
@@ -80,6 +110,7 @@ export function Compare({
           View
           <select
             value={view}
+            disabled={region === "whole"}
             onChange={(e) => change(() => setView(e.target.value))}
           >
             {views.map((v) => (
@@ -124,31 +155,79 @@ export function Compare({
                 </select>
               </label>
             </div>
-            <div className="comparison-image">
-              {!intent && chosen[side] ? (
-                <img
-                  src={image(project.project_id, chosen[side])}
-                  alt={`Comparison ${side === 0 ? "A" : "B"}: observed ${human(view)}`}
-                />
-              ) : (
-                <div className="empty-state">
-                  <h3>
-                    {intent
-                      ? "Written design intent"
-                      : "No evidence in this view"}
-                  </h3>
-                  <p>
-                    {intent
-                      ? describe(
-                          versions.find((v) => v.version_id === ids[side]) ??
-                            ({ spec: emptySpec() } as Version),
-                        )
-                      : "Import and review this slot before comparing visual properties."}
-                  </p>
+            {!intent && region === "whole" ? (
+              <div className="multi-compare">
+                {structuralViews.map((v, i) => (
+                  <figure key={v}>
+                    {wholeLinks[side]?.[i] ? (
+                      <img
+                        src={image(project.project_id, wholeLinks[side][i])}
+                        alt={`Comparison ${side === 0 ? "A" : "B"}: observed ${human(v)}`}
+                      />
+                    ) : (
+                      <div className="missing-view">No evidence</div>
+                    )}
+                    <figcaption>{human(v)}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            ) : (
+              <>
+                <label
+                  className={
+                    links[side]?.length > 1 ? "depiction-choice" : "sr-only"
+                  }
+                >
+                  Depiction for {side === 0 ? "A" : "B"}
+                  <select
+                    value={chosen[side]?.link_id ?? ""}
+                    onChange={(e) =>
+                      change(() => {
+                        const selected = [...selectedLinks];
+                        selected[side] = e.target.value;
+                        setSelectedLinks(selected);
+                      })
+                    }
+                  >
+                    {links[side]?.map((l) => (
+                      <option key={l.link_id} value={l.link_id}>
+                        {human(
+                          l.observations[0]?.observedPresentation.framing ??
+                            "unknown",
+                        )}{" "}
+                        · {l.link_id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="comparison-image">
+                  {!intent && chosen[side] ? (
+                    <img
+                      src={image(project.project_id, chosen[side])}
+                      alt={`Comparison ${side === 0 ? "A" : "B"}: observed ${human(view)}`}
+                    />
+                  ) : (
+                    <div className="empty-state">
+                      <h3>
+                        {intent
+                          ? "Written design intent"
+                          : "No evidence in this view"}
+                      </h3>
+                      <p>
+                        {intent
+                          ? describe(
+                              versions.find(
+                                (v) => v.version_id === ids[side],
+                              ) ?? ({ spec: emptySpec() } as Version),
+                            )
+                          : "Import and review this slot before comparing visual properties."}
+                      </p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            {chosen[side] && !intent && (
+              </>
+            )}
+            {chosen[side] && !intent && region !== "whole" && (
               <p className="muted">
                 {human(chosen[side].status)} ·{" "}
                 {human(
@@ -174,8 +253,8 @@ export function Compare({
                   region,
                   versionA: ids[0],
                   versionB: ids[1],
-                  linkIdsA: intent || !chosen[0] ? [] : [chosen[0].link_id],
-                  linkIdsB: intent || !chosen[1] ? [] : [chosen[1].link_id],
+                  linkIdsA: [...new Set(exposed[0])],
+                  linkIdsB: [...new Set(exposed[1])],
                   domain: intent ? "design_intent" : "visual_design",
                   expectedEventSequence: project.event_sequence,
                 }),

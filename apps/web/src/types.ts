@@ -77,6 +77,11 @@ export type Link = {
   observations: Observation[];
 };
 export type Slot = {
+  poseId?: string;
+  expressionId?: string;
+  region?: Region;
+  notApplicableReason?: string | null;
+  notApplicableBasis?: "morphology" | "project_scope" | null;
   id: string;
   view: string;
   framing: string;
@@ -85,6 +90,8 @@ export type Slot = {
   linkIds: string[];
 };
 export type Evidence = {
+  evaluationProfileId: string;
+  evaluationProfile: { stage: string; slots: Slot[] };
   version: Version;
   links: Link[];
   slots: Slot[];
@@ -112,11 +119,31 @@ export type Plan = {
   }[];
   freshness: string;
 };
+export type Ranking = {
+  state: string;
+  basis: string[];
+  ranked: { versionId: string; relativeScore: number }[];
+  unranked: { versionId: string; reason: string }[];
+  boardVersionIds: string[];
+  informativePairs: {
+    versionA: string;
+    versionB: string;
+    informationHeuristic: number;
+    predictedRelativePreference: number;
+  }[];
+};
 export type Preferences = {
+  rankings: Record<string, Ranking>;
+  contextualDisagreements: {
+    region: string;
+    eventIds: string[];
+    message: string;
+  }[];
   shortlist: string[];
   rejected: string[];
   locks: Record<string, string[]>;
   activeEventIds: string[];
+  undoableEvents: { eventId: string; action: string }[];
   state: string;
   models: Record<string, { effectiveWeight: number; eventIds: string[] }>;
   limitations: string;
@@ -152,4 +179,12 @@ export type Job = {
     error?: string;
     message?: string;
   } | null;
+};
+
+export type ModelBuild = {
+  build_id: string;
+  target_version_id: string;
+  artifact_hash: string | null;
+  provenance_level: "user_reported";
+  report_json: string;
 };

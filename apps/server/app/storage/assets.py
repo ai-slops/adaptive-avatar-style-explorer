@@ -46,6 +46,9 @@ class Assets:
                     safe = image.convert(
                         "RGBA" if image.mode in ("RGBA", "LA", "P") else "RGB"
                     )
+                    pixel_hash = hashlib.sha256(
+                        safe.mode.encode() + str(safe.size).encode() + safe.tobytes()
+                    ).hexdigest()
                     safe.thumbnail((2048, 2048))
                     # Do not carry original info/EXIF/text chunks to the derivative.
                     safe.info.clear()
@@ -97,6 +100,7 @@ class Assets:
                         canonical(
                             {
                                 "kind": "immutable_import",
+                                "pixelHash": pixel_hash,
                                 "displayDerivativeHash": hashlib.sha256(
                                     output.getvalue()
                                 ).hexdigest(),

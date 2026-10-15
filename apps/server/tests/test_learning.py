@@ -90,3 +90,50 @@ def test_controls_use_observed_unknowns_fail():
     )
     assert not observed_controls_match({"view": "front"}, {"view": "back"}, ("view",))
     assert observed_controls_match({"view": "front"}, {"view": "front"}, ("view",))
+
+
+def test_ranking_uses_common_observed_basis_and_keeps_unknown_unranked():
+    from app.learning.ranking import rank_cohort
+
+    def candidate(version, value):
+        obs = {
+            "region": "hair",
+            "attributes": {"hair.volume": attribute(value)},
+            "observedPresentation": {
+                "view": "front",
+                "projection": "orthographic",
+                "framing": "full_body",
+                "poseId": "neutral",
+                "expressionId": "neutral",
+                "lightingClass": "neutral",
+                "backgroundClass": "plain",
+            },
+        }
+        return {
+            "versionId": version,
+            "observations": [obs],
+            "sourceFamilies": [version],
+        }
+
+    coefficients = np.zeros(39)
+    coefficients[3] = -1
+    model = {
+        "state": "fitted",
+        "coefficients": coefficients.tolist(),
+        "hessian": np.eye(39).tolist(),
+        "effectiveWeight": 1,
+    }
+    result = rank_cohort(
+        [
+            candidate("low", 0.2),
+            candidate("high", 0.8),
+            {"versionId": "unknown", "observations": [], "sourceFamilies": []},
+        ],
+        model,
+        "hair",
+    )
+    assert result["state"] == "ranked_on_common_basis"
+    assert [r["versionId"] for r in result["ranked"]] == ["low", "high"]
+    assert result["unranked"][0]["versionId"] == "unknown"
+    assert result["basis"] == ["hair.volume"]
+    assert result["informativePairs"][0]["informationHeuristic"] > 0

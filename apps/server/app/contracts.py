@@ -413,3 +413,48 @@ class ReasoningOutput(Strict):
 
 class BindOfflineInput(Strict):
     projectId: str
+
+
+class EvaluationSlotInput(Strict):
+    id: str = Field(min_length=1, max_length=100)
+    view: View
+    framing: Literal["full_body", "upper_body", "face", "detail"]
+    poseId: str = Field(default="neutral", min_length=1, max_length=200)
+    expressionId: str = Field(default="neutral", min_length=1, max_length=200)
+    region: Region = "whole"
+    required: bool = True
+    notApplicableReason: str | None = Field(
+        default=None, min_length=10, max_length=2000
+    )
+    notApplicableBasis: Literal["morphology", "project_scope"] | None = None
+
+    @model_validator(mode="after")
+    def applicability(self):
+        if (self.notApplicableReason is None) != (self.notApplicableBasis is None):
+            raise ValueError(
+                "A not-applicable slot needs both a reason and morphology/project-scope basis"
+            )
+        if self.view == "unknown":
+            raise ValueError("Choose a test view; unknown is only an observation state")
+        return self
+
+
+class EvaluationProfileInput(Strict):
+    versionId: str
+    stage: Literal["screening", "shortlist", "finalist", "prototype", "custom"]
+    slots: list[EvaluationSlotInput] = Field(max_length=40)
+    changeRationale: str = Field(min_length=10, max_length=3000)
+    expectedEventSequence: int = Field(ge=0)
+
+    @field_validator("slots")
+    @classmethod
+    def unique_slots(cls, value):
+        if len({slot.id for slot in value}) != len(value):
+            raise ValueError("Each slot ID must be unique")
+        return value
+
+
+class FindingResolutionInput(Strict):
+    state: Literal["resolved", "accepted_tradeoff", "dismissed"]
+    rationale: str = Field(min_length=10, max_length=3000)
+    expectedEventSequence: int = Field(ge=0)

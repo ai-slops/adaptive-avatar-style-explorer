@@ -10,8 +10,10 @@ installation was present at initialization. This is a fresh-install implementati
   React exploration, comparisons and evidence inspection.
 - M2: baseline implemented — conservative observed-condition qualification,
   scoped masked learning, family caps, correction invalidation, structural coverage.
-  Custom evaluation profiles, finding resolution and further visual fixture tests
-  remain to be implemented.
+  Versioned morphology/state profiles, explicit finding dispositions, inherited
+  property locks, shared-basis regional ranking, informative pairs, and duplicate
+  source checks are implemented. Real image-confounding fixtures and live visual
+  analysis accuracy remain unverified.
 - M3: implemented against a signed-token mock — PKCE/OIDC registration, account
   switching and explicit offline binding, protected credentials, refresh/revocation,
   model catalog, terminal SSE parsing, image consent, budgets and durable jobs.
@@ -22,22 +24,26 @@ installation was present at initialization. This is a fresh-install implementati
   canonical hashes, no-redesign policy, export and manually mapped result import.
   Provider reasoning returns strictly validated, unconfirmed observations, findings
   and next actions. User review is required before adopting features. Richer
-  state-study recipe controls and planner prompt proposals remain.
+  state-study recipe controls are implemented. Provider-authored prompt proposals
+  remain separate from the deterministic canonical compiler.
 - M5: baseline handoff implemented — ZIP specification, reference permissions,
   coverage, findings, effective event provenance, acceptance checks and checkpoints.
-  Reported build API exists; full prototype UI, migration tooling, and preference
-  evaluation remain.
+  External model builds/capture mapping and scoped prototype checkpoints have UI
+  and API support. Pre-feedback predictions and an honest observational evaluation
+  report are exported. Legacy migration tooling and empirical preference evaluation
+  remain unverified.
 
 ## Current verification
 
-- 37 Python tests pass: domain/service transactions, reference numerical behavior,
+- 46 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- One real Chromium end-to-end test passes through project/design creation,
+- Two real Chromium end-to-end tests pass through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
-  acceptance, handoff ZIP download, and mobile overflow check.
+  acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
+  that updates only its regional preference model.
 - Browser fixtures use synthetic raster bytes to test workflow. They do not prove
   visual extraction accuracy or preference quality.
 
