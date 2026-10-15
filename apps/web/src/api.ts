@@ -1,3 +1,12 @@
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 let csrf = "";
 export function setCSRF(value: string) {
   csrf = value;
@@ -24,10 +33,11 @@ export async function api<T>(
     const error = await response
       .json()
       .catch(() => ({ detail: `Request failed (${response.status})` }));
-    throw new Error(
+    throw new ApiError(
       typeof error.detail === "string"
         ? error.detail
         : "Please check the form values. " + JSON.stringify(error.detail),
+      response.status,
     );
   }
   return response.json();

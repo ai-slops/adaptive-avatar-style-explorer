@@ -181,6 +181,34 @@ export function Account({
         </>
       )}
       <section className="paper-panel">
+        <h2>이 브라우저의 연결</h2>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={session?.rememberBrowser ?? false}
+            disabled={!session}
+            onChange={(e) => {
+              const rememberBrowser = e.target.checked;
+              void run(async () => {
+                await api("/session/remember", { rememberBrowser });
+                await load();
+              });
+            }}
+          />
+          이 브라우저를 30일 동안 기억하기
+        </label>
+        <p>
+          연결을 기억하면 서버를 다시 시작해도 기본 주소로 바로 들어올 수
+          있습니다. ‘Sign out locally’를 누르면 이 브라우저의 연결을 해제합니다.
+        </p>
+        {session?.rememberBrowser && (
+          <p className="muted">
+            연결 만료:{" "}
+            {new Date(session.sessionExpiresAt * 1000).toLocaleDateString()}
+          </p>
+        )}
+      </section>
+      <section className="paper-panel">
         <h2>Delete local project data</h2>
         <p>
           Deletion removes project images, feedback, observations, plans, jobs

@@ -6,6 +6,7 @@ import os
 import secrets
 import shutil
 import time
+import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -49,12 +50,18 @@ from .planning import Planning
 from .providers.siwc import SIWC
 from .quality import quality_report
 from .service import Service
+from .sessions import REMEMBER_SECONDS, SESSION_SECONDS, Sessions
 from .storage.assets import MAX_BYTES, Assets
 from .storage.database import Database
 
 
 class Bootstrap(Strict):
     secret: str = Field(min_length=1, max_length=200)
+    rememberBrowser: bool = True
+
+
+class RememberBrowser(Strict):
+    rememberBrowser: bool
 
 
 class NextInput(Strict):
@@ -68,6 +75,7 @@ def create_app(
     provider_transport=None,
     execution_mode="community_prompt_only",
     codex_rpc_factory=None,
+    browser_opener=None,
 ):
     require(
         execution_mode in ("community_prompt_only", "codex_local"),
@@ -88,7 +96,9 @@ def create_app(
             file.write(secrets.token_hex(16))
     principal = profile_path.read_text().strip()
     service.principal(principal)
-    sessions = {}
+    sessions = Sessions(service.database, execution_mode)
+    open_browser = browser_opener or webbrowser.open
+    last_browser_open = float("-inf")
     provider = SIWC(service, root / "credentials", origin, transport=provider_transport)
     jobs = Jobs(service, provider, assets, sessions)
 
@@ -145,14 +155,14 @@ def create_app(
             return JSONResponse(
                 {"detail": "Same-origin mutation required"}, status_code=403
             )
-        if (
-            request.url.path.startswith("/api/")
-            and request.url.path != "/api/session/bootstrap"
+        if request.url.path.startswith("/api/") and request.url.path not in (
+            "/api/session/bootstrap",
+            "/api/session/open-browser",
         ):
             session = sessions.get(request.cookies.get("avatar_session"))
             if not session or session["expires"] < time.time():
                 return JSONResponse(
-                    {"detail": "Open the local launch link to sign in"}, status_code=401
+                    {"detail": "브라우저 연결이 필요합니다."}, status_code=401
                 )
             if request.method not in ("GET", "HEAD") and not hmac.compare_digest(
                 request.headers.get("x-csrf-token", ""), session["csrf"]
@@ -172,14 +182,26 @@ def create_app(
         return response
 
     @app.post("/api/session/bootstrap")
-    def bootstrap(data: Bootstrap):
+    async def bootstrap(data: Bootstrap, request: Request):
         if not hmac.compare_digest(data.secret, secret):
-            raise DomainError("Invalid launch secret", 401)
+            raise DomainError(
+                "연결 링크가 만료되었거나 올바르지 않습니다. 현재 서버의 최초 연결 링크를 사용해 주세요.",
+                401,
+            )
+        previous = request.cookies.get("avatar_session")
+        if previous in sessions:
+            jobs.pause_session(previous)
+            sessions.pop(previous, None)
         session_id, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        expires = time.time() + (
+            REMEMBER_SECONDS if data.rememberBrowser else SESSION_SECONDS
+        )
         sessions[session_id] = {
             "principal": principal,
             "csrf": csrf,
-            "expires": time.time() + 12 * 3600,
+            "expires": expires,
+            "created": time.time(),
+            "remembered": data.rememberBrowser,
             "registration": None,
             "remainingRequests": 0,
             "usagePaused": False,
@@ -192,6 +214,8 @@ def create_app(
                 else "Local offline profile",
                 "mode": execution_mode,
                 "allowImageGeneration": native is not None,
+                "rememberBrowser": data.rememberBrowser,
+                "sessionExpiresAt": expires,
             }
         )
         response.set_cookie(
@@ -200,7 +224,7 @@ def create_app(
             httponly=True,
             samesite="strict",
             path="/",
-            max_age=12 * 3600,
+            max_age=REMEMBER_SECONDS if data.rememberBrowser else None,
         )
         return response
 
@@ -208,7 +232,9 @@ def create_app(
     def session(request: Request):
         return {
             "csrfToken": request.state.session["csrf"],
-            "profile": "ChatGPT account"
+            "profile": "Local Codex workspace"
+            if native
+            else "ChatGPT account"
             if request.state.session.get("registration")
             else "Local offline profile",
             "registrationId": request.state.session.get("registration"),
@@ -216,7 +242,56 @@ def create_app(
             "usagePaused": request.state.session.get("usagePaused", False),
             "mode": execution_mode,
             "allowImageGeneration": native is not None,
+            "rememberBrowser": request.state.session.get("remembered", False),
+            "sessionExpiresAt": request.state.session["expires"],
         }
+
+    @app.post("/api/session/remember")
+    def remember_browser(data: RememberBrowser, request: Request):
+        current = request.state.session
+        expires = time.time() + (
+            REMEMBER_SECONDS if data.rememberBrowser else SESSION_SECONDS
+        )
+        current.update({"remembered": data.rememberBrowser, "expires": expires})
+        response = JSONResponse(
+            {"rememberBrowser": data.rememberBrowser, "sessionExpiresAt": expires}
+        )
+        response.set_cookie(
+            "avatar_session",
+            request.cookies["avatar_session"],
+            httponly=True,
+            samesite="strict",
+            path="/",
+            max_age=REMEMBER_SECONDS if data.rememberBrowser else None,
+        )
+        return response
+
+    @app.post("/api/session/open-browser")
+    async def launch_browser():
+        nonlocal last_browser_open
+        require(
+            time.monotonic() - last_browser_open >= 10,
+            "A browser window was just requested. Please wait a moment.",
+            429,
+        )
+        last_browser_open = time.monotonic()
+        # OS browser launch establishes trust locally. Never return the launch
+        # secret or a session to an unauthenticated requesting browser.
+        try:
+            opened = await asyncio.wait_for(
+                asyncio.to_thread(open_browser, f"{origin}/#launch={secret}"), timeout=5
+            )
+        except (OSError, TimeoutError) as exc:
+            raise DomainError(
+                "기본 브라우저가 응답하지 않습니다. 서버의 최초 연결 링크를 아래에 붙여 넣어 주세요.",
+                503,
+            ) from exc
+        require(
+            opened,
+            "기본 브라우저를 열 수 없습니다. 서버의 최초 연결 링크를 아래에 붙여 넣어 주세요.",
+            503,
+        )
+        return {"opened": True}
 
     @app.post("/api/auth/siwc/start")
     def auth_start(data: AuthStartInput, request: Request):

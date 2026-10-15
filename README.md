@@ -23,8 +23,14 @@ PYTHONPATH=apps/server .venv/bin/python -m app
 ```
 
 The server binds to `127.0.0.1:8765` and prints a private launch link. Open the link
-to establish an application session. Options include `--no-browser`, `--port`, and
-`--data-dir`. The default `.data/` directory is ignored by Git.
+once to connect your browser. It is remembered for 30 days, including server
+restarts; bookmark `http://127.0.0.1:8765/` for later visits. A new browser can use
+**이 기기에서 워크스페이스 열기** to open the local default browser, or paste the
+initial connection link in the onboarding form. The Account & privacy checkbox
+controls remembering; **Sign out locally** revokes this browser's connection.
+See [browser access](specs/browser-access.md) for the session and pairing behavior.
+Options include `--no-browser`, `--port`, and `--data-dir`. The default `.data/`
+directory is ignored by Git.
 
 Install Codex on the same device and sign in with ChatGPT. Account & privacy shows
 the current connection and can open Codex's login flow if needed. Credentials stay

@@ -150,6 +150,8 @@ export type Preferences = {
 };
 
 export type SessionInfo = {
+  rememberBrowser: boolean;
+  sessionExpiresAt: number;
   mode: "codex_local" | "community_prompt_only";
   allowImageGeneration: boolean;
   registrationId: string | null;

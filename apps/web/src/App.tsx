@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, setCSRF } from "./api";
+import { api, ApiError, setCSRF } from "./api";
 import type {
   Project,
   Design,
@@ -16,6 +16,7 @@ import { Prompts } from "./components/Prompts";
 import { Handoff } from "./components/Handoff";
 import { Account } from "./components/Account";
 import { ReviewHistory } from "./components/ReviewHistory";
+import { ConnectBrowser } from "./components/ConnectBrowser";
 import { Reasoning } from "./components/Reasoning";
 export function App() {
   const [ready, setReady] = useState(false),
@@ -89,29 +90,51 @@ export function App() {
     );
     setEvidence(Object.fromEntries(es));
   }
+  async function enterWorkspace() {
+    const session = await api<{ csrfToken: string; mode: string }>("/session");
+    setCSRF(session.csrfToken);
+    setCodex(session.mode === "codex_local");
+    history.replaceState(null, "", location.pathname);
+    setNeedsLaunch(false);
+    const list = await api<Project[]>("/projects");
+    setProjects(list);
+    if (list[0]) setProjectId(list[0].project_id);
+    setReady(true);
+  }
   useEffect(() => {
-    void run(async () => {
-      const launch = new URLSearchParams(location.hash.slice(1)).get("launch");
-      try {
-        const session = launch
-          ? await api<{ csrfToken: string; mode: string }>(
-              "/session/bootstrap",
-              {
+    const connect = () =>
+      void run(async () => {
+        const launch = new URLSearchParams(location.hash.slice(1)).get(
+          "launch",
+        );
+        // Remove the bootstrap capability from browser history immediately, even
+        // if the server is unreachable or the link has expired.
+        if (launch) history.replaceState(null, "", location.pathname);
+        try {
+          await enterWorkspace();
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.status !== 401) throw e;
+          if (launch) {
+            try {
+              await api("/session/bootstrap", {
                 secret: launch,
-              },
-            )
-          : await api<{ csrfToken: string; mode: string }>("/session");
-        setCSRF(session.csrfToken);
-        setCodex(session.mode === "codex_local");
-        history.replaceState(null, "", location.pathname);
-        setReady(true);
-        const list = await api<Project[]>("/projects");
-        setProjects(list);
-        if (list[0]) setProjectId(list[0].project_id);
-      } catch {
-        setNeedsLaunch(true);
-      }
-    });
+                rememberBrowser: true,
+              });
+              await enterWorkspace();
+              return;
+            } catch (error) {
+              setError((error as Error).message);
+            }
+          }
+          setNeedsLaunch(true);
+        }
+      });
+    connect();
+    const onHashChange = () => {
+      if (new URLSearchParams(location.hash.slice(1)).has("launch")) connect();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
   useEffect(() => {
     if (ready && projectId) void run(() => refresh(projectId));
@@ -160,11 +183,11 @@ export function App() {
           <br />
           bringing to life.
         </h1>
-        <p>
-          {needsLaunch
-            ? "Open the launch link printed by the local server to enter your private workspace."
-            : "Opening your local workspace…"}
-        </p>
+        {needsLaunch ? (
+          <ConnectBrowser onConnected={enterWorkspace} />
+        ) : (
+          <p>Opening your local workspace…</p>
+        )}
         {error && <p role="alert">{error}</p>}
       </main>
     );

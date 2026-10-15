@@ -36,18 +36,24 @@ installation was present at initialization. This is a fresh-install implementati
 
 ## Current verification
 
-- 55 Python tests pass: domain/service transactions, reference numerical behavior,
+- 58 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- Three real Chromium end-to-end tests pass through project/design creation,
+- Four real Chromium end-to-end tests pass through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
   acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
   that updates only its regional preference model. The third checks native-mode
   connection, generation, unreviewed import and reload using an isolated fake worker.
+  The fourth covers initial browser pairing, remembered plain-URL access, the
+  remembering setting, explicit sign-out and revoked access.
 - Browser fixtures use synthetic raster bytes to test workflow. They do not prove
   visual extraction accuracy or preference quality.
+
+Remembered browser sessions survive application restart with a fixed 30-day
+expiry, revocation, runtime mode isolation, and zero restored provider budgets.
+[Browser access evidence](browser-access.md) describes the new first-visit flow.
 
 ## Local Codex acceptance (2026-10-15)
 

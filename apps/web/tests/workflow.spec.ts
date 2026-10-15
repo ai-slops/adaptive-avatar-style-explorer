@@ -255,3 +255,59 @@ test("native Codex connection, generation and unreviewed evidence round trip", a
   await expect(page.getByText("LOCAL CODEX", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("first browser connection remembers the plain URL and supports explicit sign-out", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "이 브라우저를 연결해 주세요." }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "이 기기에서 워크스페이스 열기" }),
+  ).toBeVisible();
+  await page
+    .getByText("창이 열리지 않거나 다른 브라우저를 사용하시나요?")
+    .click();
+  await page
+    .getByLabel("최초 연결 링크", { exact: true })
+    .fill("http://127.0.0.1:8766/#launch=browser-test");
+  await page
+    .getByRole("button", { name: "이 브라우저 연결하고 기억하기" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "06 Account & privacy" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("");
+  const cookie = (await context.cookies()).find(
+    (c) => c.name === "avatar_session",
+  )!;
+  expect(cookie.httpOnly).toBe(true);
+  expect(cookie.sameSite).toBe("Strict");
+  expect(cookie.expires - Date.now() / 1000).toBeGreaterThan(29 * 86400);
+  const otherTab = await context.newPage();
+  await otherTab.goto("/");
+  await expect(
+    otherTab.getByRole("button", { name: "06 Account & privacy" }),
+  ).toBeVisible();
+  await otherTab.close();
+  await page.getByRole("button", { name: "06 Account & privacy" }).click();
+  await expect(
+    page.getByLabel("이 브라우저를 30일 동안 기억하기"),
+  ).toBeChecked();
+  await page.getByRole("button", { name: "Sign out locally" }).click();
+  await expect(
+    page.getByRole("heading", { name: "이 브라우저를 연결해 주세요." }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "이 브라우저를 연결해 주세요." }),
+  ).toBeVisible();
+  // A launch link can change only the fragment of the already-open page.
+  await page.goto("/#launch=browser-test");
+  await expect(
+    page.getByRole("button", { name: "06 Account & privacy" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("");
+});
