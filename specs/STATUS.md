@@ -34,20 +34,33 @@ installation was present at initialization. This is a fresh-install implementati
   report are exported. Legacy migration tooling and empirical preference evaluation
   remain unverified.
 
+The [open acceptance audit](ACCEPTANCE.md) records remaining functional and
+verification gaps. In particular, hypothesis management, the complete next-action
+workflow, explicit observations in reasoning context, the full manual scenario,
+legacy migration and empirical preference evaluation are not proven complete.
+
+Canonical editing now supports typed values, provenance, notes, attachment/layer
+relationships and multi-line unresolved decisions. Historical canonical decision
+sources export under their own original version and never inflate current coverage.
+Branch variants retain their user-authored rationale and can explicitly unlock
+inherited properties without altering parent-branch locks.
+
 ## Current verification
 
-- 58 Python tests pass: domain/service transactions, reference numerical behavior,
+- 59 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- Four real Chromium end-to-end tests pass through project/design creation,
+- Five real Chromium end-to-end tests pass through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
   acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
   that updates only its regional preference model. The third checks native-mode
   connection, generation, unreviewed import and reload using an isolated fake worker.
   The fourth covers initial browser pairing, remembered plain-URL access, the
-  remembering setting, explicit sign-out and revoked access.
+  remembering setting, explicit sign-out and revoked access. The fifth verifies
+  typed canonical values, component relationships, notes, source image/decision IDs,
+  multi-line decisions, deliberate adoption and preservation of the old version.
 - Browser fixtures use synthetic raster bytes to test workflow. They do not prove
   visual extraction accuracy or preference quality.
 
