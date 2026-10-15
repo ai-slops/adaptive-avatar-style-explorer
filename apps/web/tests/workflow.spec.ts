@@ -1,9 +1,31 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function advanced(page: Page) {
+  const tools = page.locator(".advanced-tools");
+  if (!(await tools.getAttribute("open"))) {
+    if (!(await tools.evaluate((e) => (e as HTMLDetailsElement).open)))
+      await tools.locator("summary").first().click();
+  }
+}
+async function managedProject(page: Page, title: string) {
+  await page.getByRole("button", { name: "＋ 새 탐색", exact: true }).click();
+  await page
+    .getByText("이름이나 떠오르는 생각이 있나요? 선택 사항", { exact: true })
+    .click();
+  await page.getByLabel("탐색 이름", { exact: true }).fill(title);
+  await page
+    .getByText("직접 설계하거나 기존 도구 사용", { exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "고급 작업 도구 열기", exact: true })
+    .click();
+  await advanced(page);
+}
 
 test("offline design, evidence, prompt and handoff round trip", async ({
   page,
@@ -11,8 +33,7 @@ test("offline design, evidence, prompt and handoff round trip", async ({
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/#launch=browser-test");
-  await page.getByLabel("Project name").fill("Astronomer");
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await managedProject(page, "Astronomer");
   await page.getByRole("button", { name: "Add your first design" }).click();
   await page.getByLabel("Design name").fill("Silver traveller");
   await page.getByLabel("Character structure").selectOption("humanoid");
@@ -83,9 +104,7 @@ test("matched visual comparison records only the shown scoped evidence", async (
   page,
 }) => {
   await page.goto("/#launch=browser-test");
-  await page.getByRole("button", { name: "New project", exact: false }).click();
-  await page.getByLabel("Project name").fill("Matched comparison");
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await managedProject(page, "Matched comparison");
   const session = await (await page.request.get("/api/session")).json();
   const headers = {
     origin: "http://127.0.0.1:8766",
@@ -178,6 +197,7 @@ test("matched visual comparison records only the shown scoped evidence", async (
     expect(reviewed.ok()).toBe(true);
   }
   await page.reload();
+  await advanced(page);
   await page.getByRole("button", { name: /02 Compare/ }).click();
   await page
     .getByRole("combobox", { name: "Design A", exact: true })
@@ -213,15 +233,17 @@ test("native Codex connection, generation and unreviewed evidence round trip", a
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("http://127.0.0.1:8767/#launch=codex-browser-test");
-  await expect(page.getByText("LOCAL CODEX", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "06 Account & privacy" }).click();
+  await expect(
+    page.getByText("개인 Codex 생성", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(page.getByText("연결됨", { exact: false })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Continue with ChatGPT" }),
   ).toHaveCount(0);
+  await advanced(page);
   await page.getByRole("button", { name: "01 Explore designs" }).click();
-  await page.getByLabel("Project name").fill("Codex generation");
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await managedProject(page, "Codex generation");
   await page.getByRole("button", { name: "Add your first design" }).click();
   await page.getByLabel("Design name").fill("Moon traveller");
   await page.getByLabel("Character structure").selectOption("humanoid");
@@ -252,7 +274,10 @@ test("native Codex connection, generation and unreviewed evidence round trip", a
     page.getByRole("article").getByText("unreviewed", { exact: true }),
   ).toBeVisible();
   await page.reload();
-  await expect(page.getByText("LOCAL CODEX", { exact: true })).toBeVisible();
+  await advanced(page);
+  await expect(
+    page.getByText("개인 Codex 생성", { exact: true }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -277,7 +302,7 @@ test("first browser connection remembers the plain URL and supports explicit sig
     .getByRole("button", { name: "이 브라우저 연결하고 기억하기" })
     .click();
   await expect(
-    page.getByRole("button", { name: "06 Account & privacy" }),
+    page.getByRole("button", { name: "설정", exact: true }),
   ).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   const cookie = (await context.cookies()).find(
@@ -289,14 +314,14 @@ test("first browser connection remembers the plain URL and supports explicit sig
   const otherTab = await context.newPage();
   await otherTab.goto("/");
   await expect(
-    otherTab.getByRole("button", { name: "06 Account & privacy" }),
+    otherTab.getByRole("button", { name: "설정", exact: true }),
   ).toBeVisible();
   await otherTab.close();
-  await page.getByRole("button", { name: "06 Account & privacy" }).click();
+  await page.getByRole("button", { name: "설정", exact: true }).click();
   await expect(
     page.getByLabel("이 브라우저를 30일 동안 기억하기"),
   ).toBeChecked();
-  await page.getByRole("button", { name: "Sign out locally" }).click();
+  await page.getByRole("button", { name: "이 브라우저 로그아웃" }).click();
   await expect(
     page.getByRole("heading", { name: "이 브라우저를 연결해 주세요." }),
   ).toBeVisible();
@@ -307,7 +332,7 @@ test("first browser connection remembers the plain URL and supports explicit sig
   // A launch link can change only the fragment of the already-open page.
   await page.goto("/#launch=browser-test");
   await expect(
-    page.getByRole("button", { name: "06 Account & privacy" }),
+    page.getByRole("button", { name: "설정", exact: true }),
   ).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
 });
@@ -318,7 +343,7 @@ test("canonical editor adopts relationships and sources without losing typed val
   page.setDefaultTimeout(5000);
   await page.goto("/#launch=browser-test");
   await expect(
-    page.getByRole("button", { name: "06 Account & privacy" }),
+    page.getByRole("button", { name: "설정", exact: true }),
   ).toBeVisible();
   const session = await (await page.request.get("/api/session")).json();
   const headers = {
@@ -377,8 +402,9 @@ test("canonical editor adopts relationships and sources without losing typed val
       event.sequence === original.created_sequence,
   ).event_id;
   await page.reload();
+  await advanced(page);
   await page
-    .getByRole("combobox", { name: "Project", exact: true })
+    .getByRole("combobox", { name: "프로젝트", exact: true })
     .selectOption(project.project_id);
   await page.getByRole("button", { name: "03 Design & evidence" }).click();
   await page

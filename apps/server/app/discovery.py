@@ -926,6 +926,7 @@ class Discovery:
                         "otherDirections": dict(effective["directions"]),
                         "status": "design_chosen",
                         "unresolved": version["spec"]["unresolvedDecisions"],
+                        "coverageUnconfigured": not bool(selection_coverage["slots"]),
                         "uncheckedViews": [
                             slot
                             for slot in selection_coverage["slots"]

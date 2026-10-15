@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, setCSRF } from "./api";
 import type {
   Project,
@@ -17,6 +17,7 @@ import { Handoff } from "./components/Handoff";
 import { Account } from "./components/Account";
 import { ReviewHistory } from "./components/ReviewHistory";
 import { ConnectBrowser } from "./components/ConnectBrowser";
+import { Discovery } from "./components/Discovery";
 import { Reasoning } from "./components/Reasoning";
 export function App() {
   const [ready, setReady] = useState(false),
@@ -30,7 +31,7 @@ export function App() {
     [evidence, setEvidence] = useState<Record<string, Evidence>>({});
   const [preferences, setPreferences] = useState<Preferences | null>(null),
     [plans, setPlans] = useState<Plan[]>([]);
-  const [screen, setScreen] = useState("explore"),
+  const [screen, setScreen] = useState("discovery"),
     [selected, setSelected] = useState(""),
     [editor, setEditor] = useState<Version | null | false>(false);
   const [compareIds, setCompareIds] = useState<string[]>([]),
@@ -40,6 +41,9 @@ export function App() {
   >([]);
   const [codex, setCodex] = useState(false);
   const [rankingRegion, setRankingRegion] = useState("whole");
+  const refreshEpoch = useRef(0);
+  const currentProject = useRef(projectId);
+  currentProject.current = projectId;
   const project = projects.find((p) => p.project_id === projectId);
   const allVersions = designs.flatMap((d) => d.versions);
   const version = allVersions.find((v) => v.version_id === selected);
@@ -60,9 +64,12 @@ export function App() {
     }
   }
   async function refresh(p = projectId, branchId = branch) {
+    const epoch = ++refreshEpoch.current;
     const list = await api<Project[]>("/projects");
-    setProjects(list);
-    if (!p) return;
+    if (!p) {
+      if (epoch === refreshEpoch.current) setProjects(list);
+      return;
+    }
     const [ds, pref, packs, branchList] = await Promise.all([
       api<Design[]>(`/projects/${p}/designs?branchId=${branchId}`),
       api<Preferences>(`/projects/${p}/preferences?branchId=${branchId}`),
@@ -71,10 +78,6 @@ export function App() {
         `/projects/${p}/branches`,
       ),
     ]);
-    setBranches(branchList);
-    setDesigns(ds);
-    setPreferences(pref);
-    setPlans(packs);
     const es = await Promise.all(
       ds
         .flatMap((d) => d.versions)
@@ -88,6 +91,12 @@ export function App() {
             ] as const,
         ),
     );
+    if (epoch !== refreshEpoch.current || p !== currentProject.current) return;
+    setProjects(list);
+    setBranches(branchList);
+    setDesigns(ds);
+    setPreferences(pref);
+    setPlans(packs);
     setEvidence(Object.fromEntries(es));
   }
   async function enterWorkspace() {
@@ -98,7 +107,12 @@ export function App() {
     setNeedsLaunch(false);
     const list = await api<Project[]>("/projects");
     setProjects(list);
-    if (list[0]) setProjectId(list[0].project_id);
+    const remembered = localStorage.getItem("avatar.currentProject");
+    setProjectId(
+      list.find((p) => p.project_id === remembered)?.project_id ??
+        list[0]?.project_id ??
+        "",
+    );
     setReady(true);
   }
   useEffect(() => {
@@ -137,8 +151,12 @@ export function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
   useEffect(() => {
-    if (ready && projectId) void run(() => refresh(projectId));
-  }, [projectId, ready, branch]);
+    if (ready && projectId) {
+      localStorage.setItem("avatar.currentProject", projectId);
+      if (screen !== "discovery" && screen !== "new-project")
+        void run(() => refresh(projectId));
+    }
+  }, [projectId, ready, branch, screen]);
   async function feedback(
     action: string,
     v?: string,
@@ -179,14 +197,14 @@ export function App() {
         <div className="brandmark">f.</div>
         <p className="eyebrow">FORM & CHARACTER</p>
         <h1>
-          A character worth
+          나에게 맞는 캐릭터를
           <br />
-          bringing to life.
+          찾아보세요.
         </h1>
         {needsLaunch ? (
           <ConnectBrowser onConnected={enterWorkspace} />
         ) : (
-          <p>Opening your local workspace…</p>
+          <p>개인 작업 공간을 여는 중…</p>
         )}
         {error && <p role="alert">{error}</p>}
       </main>
@@ -199,7 +217,7 @@ export function App() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            setScreen("explore");
+            setScreen("discovery");
           }}
         >
           <span className="brandmark">f.</span>
@@ -208,9 +226,9 @@ export function App() {
             character
           </span>
         </a>
-        <p className="sidebar-label">YOUR WORKSPACE</p>
+        <p className="sidebar-label">내 작업 공간</p>
         <label className="sr-only" htmlFor="project">
-          Project
+          프로젝트
         </label>
         <select
           id="project"
@@ -222,7 +240,7 @@ export function App() {
             setCompareIds([]);
           }}
         >
-          <option value="">Choose a project</option>
+          <option value="">프로젝트 선택</option>
           {projects.map((p) => (
             <option key={p.project_id} value={p.project_id}>
               {p.title}
@@ -233,59 +251,75 @@ export function App() {
           className="text-button"
           onClick={() => setScreen("new-project")}
         >
-          ＋ New project
+          ＋ 새 탐색
         </button>
-        {project && (
-          <label className="branch-picker">
-            Design branch
-            <select
-              value={branch}
-              onChange={(e) => {
-                setBranch(e.target.value);
-                setSelected("");
-                setCompareIds([]);
-              }}
-            >
-              {branches.map((b) => (
-                <option value={b.branch_id} key={b.branch_id}>
-                  {b.branch_id === "main"
-                    ? "Main exploration"
-                    : `Alternative · through ${b.parent_sequence}`}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <nav aria-label="Workspace">
-          {[
-            ["explore", "01", "Explore designs"],
-            ["compare", "02", "Compare"],
-            ["inspect", "03", "Design & evidence"],
-            ["prompts", "04", "Prompt workspace"],
-            ["handoff", "05", "3D handoff"],
-            ["account", "06", "Account & privacy"],
-          ].map(([id, n, label]) => (
-            <button
-              key={id}
-              className={screen === id ? "active" : ""}
-              onClick={() => setScreen(id)}
-            >
-              <span>{n}</span>
-              {label}
-              {id === "compare" && compareIds.length > 0 && (
-                <small>{compareIds.length}</small>
-              )}
-            </button>
-          ))}
+        <nav aria-label="주요 메뉴">
+          <button
+            className={screen === "discovery" ? "active" : ""}
+            onClick={() => setScreen("discovery")}
+          >
+            탐색
+          </button>
+          <button
+            className={screen === "account" ? "active" : ""}
+            onClick={() => setScreen("account")}
+          >
+            설정
+          </button>
         </nav>
+        <details className="advanced-tools">
+          <summary>고급 작업 도구</summary>
+          {project && (
+            <label className="branch-picker">
+              Design branch
+              <select
+                value={branch}
+                onChange={(e) => {
+                  setBranch(e.target.value);
+                  setSelected("");
+                  setCompareIds([]);
+                }}
+              >
+                {branches.map((b) => (
+                  <option value={b.branch_id} key={b.branch_id}>
+                    {b.branch_id === "main"
+                      ? "Main exploration"
+                      : `Alternative · through ${b.parent_sequence}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <nav aria-label="Workspace">
+            {[
+              ["explore", "01", "Explore designs"],
+              ["compare", "02", "Compare"],
+              ["inspect", "03", "Design & evidence"],
+              ["prompts", "04", "Prompt workspace"],
+              ["handoff", "05", "3D handoff"],
+            ].map(([id, n, label]) => (
+              <button
+                key={id}
+                className={screen === id ? "active" : ""}
+                onClick={() => setScreen(id)}
+              >
+                <span>{n}</span>
+                {label}
+                {id === "compare" && compareIds.length > 0 && (
+                  <small>{compareIds.length}</small>
+                )}
+              </button>
+            ))}
+          </nav>
+        </details>
         <div className="sidebar-footer">
-          <span className="status-dot" /> Local private workspace
+          <span className="status-dot" /> 이 기기의 개인 작업 공간
           <p>
-            Selected images leave only with consent.
+            이미지 전송에는 별도 동의가 필요합니다.
             <br />
             {codex
-              ? "Codex generates images on request."
-              : "Prompts are prepared as text."}
+              ? "요청한 횟수만 Codex로 생성합니다."
+              : "외부 생성용 프롬프트를 준비합니다."}
           </p>
           <button
             className="text-button"
@@ -297,17 +331,26 @@ export function App() {
               })
             }
           >
-            Sign out locally
+            이 브라우저 로그아웃
           </button>
         </div>
       </aside>
       <div className="main-shell">
         <header className="topbar">
           <span>
-            {project?.title || "Your next character"}{" "}
-            <span className="muted">/ {human(screen)}</span>
+            {project?.title || "나의 아바타 탐색"}{" "}
+            <span className="muted">
+              /{" "}
+              {screen === "discovery" || screen === "new-project"
+                ? "탐색"
+                : screen === "account"
+                  ? "설정"
+                  : "고급 도구"}
+            </span>
           </span>
-          <span className="pill">{codex ? "LOCAL CODEX" : "PROMPT ONLY"}</span>
+          <span className="pill">
+            {codex ? "개인 Codex 생성" : "외부 생성·프롬프트"}
+          </span>
         </header>
         <main>
           <div aria-live="polite">
@@ -322,7 +365,7 @@ export function App() {
             {notice && <div className="message">{notice}</div>}
             {busy && (
               <p className="working" role="status">
-                Saving your workspace…
+                작업 공간을 불러오고 있습니다…
               </p>
             )}
           </div>
@@ -331,6 +374,7 @@ export function App() {
               codex={codex}
               run={run}
               onSwitch={async () => {
+                ++refreshEpoch.current;
                 setProjectId("");
                 setSelected("");
                 setCompareIds([]);
@@ -342,43 +386,29 @@ export function App() {
                 if (list[0]) setProjectId(list[0].project_id);
               }}
             />
-          ) : !project || screen === "new-project" ? (
-            <section className="onboarding">
-              <p className="eyebrow">A REUSABLE 3D AVATAR</p>
-              <h1>Start with a possibility.</h1>
-              <p>
-                A name is enough to begin. Bring a reference, a rough idea, or
-                an open mind.
-              </p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const data = new FormData(e.currentTarget);
-                  void run(async () => {
-                    const p = await api<Project>("/projects", {
-                      title: data.get("title"),
-                    });
-                    setBranch("main");
-                    setProjectId(p.project_id);
-                    await refresh(p.project_id, "main");
-                    setScreen("explore");
-                  });
-                }}
-              >
-                <label>
-                  Project name
-                  <input
-                    name="title"
-                    placeholder="My avatar exploration"
-                    required
-                    maxLength={120}
-                  />
-                </label>
-                <button className="primary" disabled={busy}>
-                  Create workspace ↗
-                </button>
-              </form>
-            </section>
+          ) : screen === "discovery" || screen === "new-project" || !project ? (
+            <Discovery
+              key={screen === "new-project" ? "new" : projectId || "empty"}
+              project={screen === "new-project" ? undefined : project}
+              codex={codex}
+              onCreated={(p) => {
+                setProjects((list) =>
+                  list.some((item) => item.project_id === p.project_id)
+                    ? list
+                    : [p, ...list],
+                );
+                setBranch("main");
+                setSelected("");
+                setCompareIds([]);
+                setProjectId(p.project_id);
+                setScreen("discovery");
+              }}
+              onAdvanced={(id) => {
+                setSelected(id ?? "");
+                setScreen(id ? "inspect" : "explore");
+              }}
+              onSettings={() => setScreen("account")}
+            />
           ) : (
             <>
               {screen === "explore" && (
@@ -756,9 +786,8 @@ export function App() {
           )}
         </main>
         <footer>
-          FORM & CHARACTER{" "}
-          <span>A design discovery studio for reusable avatars.</span>
-          <span>Concept evidence ≠ a validated 3D model</span>
+          FORM & CHARACTER <span>보고 고르며 찾는 나의 아바타.</span>
+          <span>참고 이미지와 실제 3D 모델 검토는 별개입니다.</span>
         </footer>
       </div>
       {editor !== false && (

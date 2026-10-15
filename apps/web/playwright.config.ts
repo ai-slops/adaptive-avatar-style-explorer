@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "tests",
   fullyParallel: false,
+  workers: 1, // The native fixture intentionally models one local installation owner.
   use: {
     baseURL: "http://127.0.0.1:8766",
     headless: true,

@@ -637,6 +637,8 @@ def test_bulk_references_start_distinct_provisional_candidates(discovery, projec
     assert all(c["image"]["status"] == "unreviewed" for c in first)
     assert all(s["morphology"] == "unspecified" for s in specs(d, project, first))
     assert not d.state("alice", project)["directions"]
+    _, chosen = reaction(d, project, "use_design", first[:1])
+    assert chosen["selection"]["coverageUnconfigured"] is True
     reaction(d, project, "both", first)
     prepare(d, project)
     assert {c["sourceCandidateId"] for c in board(d, project)[:2]} == {
