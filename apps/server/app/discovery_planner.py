@@ -84,18 +84,30 @@ VARIANTS = {
         "a longer face with a defined jaw and compact eyes",
         "a round compact face with stronger brows and a small angular chin",
         "an oval face with a narrow chin and broad softly curved cheeks",
+        "a short broad face with a square jaw and a soft curved nose",
+        "a long tapered face with high cheek planes and a rounded chin",
+        "a rounded face with a wide lower jaw and narrow expressive eyes",
+        "a diamond-shaped face with a small chin and broad expressive brows",
     ],
     "hair": [
         "a clean chin-length geometric bob with an asymmetric side part",
         "two thick low braids with loose curled ends",
         "a high swept crest with short close sides",
         "a broad shoulder-length wavy mass with a low tied section",
+        "a short rounded curly crop with a clearly exposed neck",
+        "a single long thick braid draped over one shoulder",
+        "a pair of broad sculpted side buns with a short fringe",
+        "a layered shoulder-length shag with an open center part",
     ],
     "outfit": [
         "a cropped structured vest over a long pleated tunic and tapered trousers",
         "a wide flowing cape over a fitted high-collar coat",
         "a short layered utility jacket over broad culottes and sturdy boots",
         "a long asymmetrical wrap coat with slim sleeves and a high waist",
+        "a broad sleeveless mantle over a short fitted jacket and wide trousers",
+        "a narrow long tunic under a round quilted shoulder cape",
+        "a layered apron dress over a fitted shirt and practical ankle boots",
+        "a belted knee-length robe with broad sleeves and a short split overskirt",
     ],
     "body": [
         "a compact rounded body silhouette with shorter limbs",
@@ -179,8 +191,60 @@ def signature(spec):
             "properties": {
                 key: value["value"]
                 for key, value in spec["properties"].items()
-                if key != "design.description"
+                if key != "design.description" and not key.startswith("discovery.")
             },
             "relations": spec["componentRelations"],
         }
     )
+
+
+VARIANT_LABELS = {
+    "face": [
+        "넓고 부드러운 얼굴",
+        "길고 또렷한 턱선",
+        "짧고 둥근 얼굴",
+        "갸름한 타원형 얼굴",
+        "부드러운 사각 턱",
+        "높은 광대와 둥근 턱",
+        "넓은 턱과 가는 눈",
+        "작은 턱과 짙은 눈썹",
+    ],
+    "hair": [
+        "각진 단발",
+        "낮은 양갈래 땋은 머리",
+        "높이 쓸어 올린 머리",
+        "넓게 흐르는 웨이브",
+        "짧은 곱슬머리",
+        "한쪽으로 긴 땋은 머리",
+        "양옆 둥근 올림머리",
+        "가운데를 가른 층진 머리",
+    ],
+    "outfit": [
+        "짧은 조끼와 긴 튜닉",
+        "넓은 망토와 긴 코트",
+        "작업 재킷과 넓은 바지",
+        "비대칭 랩 코트",
+        "넓은 어깨 망토",
+        "긴 튜닉과 누빔 케이프",
+        "겹친 앞치마 원피스",
+        "넓은 소매의 허리띠 로브",
+    ],
+    "body": [
+        "작고 둥근 체형",
+        "키 크고 가는 체형",
+        "넓은 어깨의 체형",
+        "아래로 넓어지는 체형",
+    ],
+    "accessories": [
+        "작은 잎 브로치",
+        "어깨 고리와 허리 주머니",
+        "귀 장식과 작은 케이스",
+        "넓은 허리띠와 가방",
+    ],
+    "palette": ["아이보리와 버건디", "청록과 주황", "라벤더와 숲빛", "차콜과 구릿빛"],
+}
+
+
+def variant_label(spec, part):
+    value = spec["properties"][PART_KEYS[part]]["value"]
+    return VARIANT_LABELS[part][VARIANTS[part].index(value)]

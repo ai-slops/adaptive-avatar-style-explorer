@@ -120,3 +120,15 @@ class DiscoveryLibraryInput(Strict):
     requestId: str = Field(min_length=1, max_length=100)
     expectedRevision: int = Field(ge=0)
     versionId: str
+
+
+class DiscoveryReferencesInput(Strict):
+    requestId: str = Field(min_length=1, max_length=100)
+    expectedRevision: int = Field(ge=0)
+    inspirationIds: list[str] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def distinct(self):
+        if len(self.inspirationIds) != len(set(self.inspirationIds)):
+            raise ValueError("Choose each reference once")
+        return self

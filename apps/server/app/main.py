@@ -50,6 +50,7 @@ from .discovery_contracts import (
     DiscoveryImportInput,
     DiscoveryLibraryInput,
     DiscoveryReactionInput,
+    DiscoveryReferencesInput,
     DiscoveryRoundInput,
 )
 from .evaluation import Evaluation
@@ -559,6 +560,10 @@ def create_app(
     @app.post("/api/projects/{p}/discovery/library")
     def discovery_library(p: str, data: DiscoveryLibraryInput, request: Request):
         return {"roundId": discovery.use_library(request.state.principal, p, data)}
+
+    @app.post("/api/projects/{p}/discovery/references")
+    def discovery_references(p: str, data: DiscoveryReferencesInput, request: Request):
+        return {"roundId": discovery.from_references(request.state.principal, p, data)}
 
     @app.post("/api/projects/{p}/discovery/imports")
     def discovery_import(p: str, data: DiscoveryImportInput, request: Request):

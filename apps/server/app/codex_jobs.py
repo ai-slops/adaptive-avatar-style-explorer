@@ -64,7 +64,7 @@ class CodexJobs:
             "mode": "codex_local",
             "imageGeneration": "native_tool_available_subject_to_completed_turn",
             "credentials": "managed_by_local_codex",
-            "usageMeaning": "Each explicit action authorizes one Codex turn. No automatic retry or background generation.",
+            "usageMeaning": "Each individual job authorizes one Codex turn; a discovery batch explicitly authorizes its finite displayed candidate count. No automatic retry or passive generation.",
         }
 
     async def models(self):

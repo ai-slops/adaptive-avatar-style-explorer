@@ -607,3 +607,138 @@ def test_community_api_cannot_reach_native_generation(tmp_path):
             client.post(base + f"/rounds/{rid}/export", headers=headers).status_code
             == 200
         )
+
+
+def test_bulk_references_start_distinct_provisional_candidates(discovery, project):
+    from app.discovery_contracts import DiscoveryReferencesInput
+
+    d = discovery
+    items = [
+        {
+            "assetId": d.assets.import_image("alice", project, image_bytes(color))[
+                "assetId"
+            ],
+            "independentReference": True,
+        }
+        for color in ("green", "blue")
+    ]
+    imported = d.import_results(
+        "alice", project, DiscoveryImportInput(requestId=uid(), items=items)
+    )
+    request = DiscoveryReferencesInput(
+        requestId=uid(),
+        expectedRevision=0,
+        inspirationIds=[i["inspirationId"] for i in imported],
+    )
+    rid = d.from_references("alice", project, request)
+    assert d.from_references("alice", project, request) == rid
+    first = board(d, project)
+    assert len(first) == 2 and len({c["directionId"] for c in first}) == 2
+    assert all(c["image"]["status"] == "unreviewed" for c in first)
+    assert all(s["morphology"] == "unspecified" for s in specs(d, project, first))
+    assert not d.state("alice", project)["directions"]
+    reaction(d, project, "both", first)
+    prepare(d, project)
+    assert {c["sourceCandidateId"] for c in board(d, project)[:2]} == {
+        c["candidateId"] for c in first
+    }
+    with pytest.raises(DomainError):
+        d.from_references("bob", project, request)
+
+
+def test_views_correction_anchors_and_unexpected_adoption_do_not_reject_design(
+    discovery, project
+):
+    d = discovery
+    prepare(d, project, count=1)
+    original = returned(d, project, board(d, project))[0]
+    prepare(
+        d,
+        project,
+        intent="observe",
+        candidateId=original["candidateId"],
+        view="character_left_profile",
+    )
+    observed = returned(d, project, board(d, project))[0]
+    assert (
+        observed["kind"] == "observation"
+        and observed["versionId"] == original["versionId"]
+    )
+    reaction(d, project, "image_wrong", [observed])
+    prepare(
+        d,
+        project,
+        intent="correct",
+        candidateId=observed["candidateId"],
+        view="character_left_profile",
+    )
+    correction = board(d, project)[0]
+    assert correction["kind"] == "correction"
+    assert correction["versionId"] == original["versionId"]
+    assert correction["sourceLinkIds"] == [original["image"]["linkId"]]
+    returned(d, project, [correction])
+    prepare(d, project, intent="correct", candidateId=observed["candidateId"])
+    returned(d, project, board(d, project))
+    with pytest.raises(DomainError, match="두 번"):
+        prepare(d, project, intent="correct", candidateId=observed["candidateId"])
+    prepare(d, project, intent="adopt", candidateId=observed["candidateId"])
+    independent = board(d, project)[0]
+    assert independent["image"]["assetId"] == observed["image"]["assetId"]
+    assert independent["image"]["status"] == "unreviewed"
+    assert independent["versionId"] != original["versionId"]
+    assert independent["directionId"] != original["directionId"]
+    assert not d.state("alice", project)["rejected"]
+
+
+def test_later_confirmed_lock_blocks_an_already_prepared_conflicting_variant(
+    discovery, project
+):
+    from app.contracts import FeedbackInput
+    from test_domain import sequence
+
+    d = discovery
+    prepare(d, project, count=1)
+    original = returned(d, project, board(d, project))[0]
+    reaction(d, project, "interest", [original])
+    prepare(
+        d,
+        project,
+        intent="focus",
+        candidateId=original["candidateId"],
+        part="hair",
+        count=1,
+    )
+    pending = board(d, project)[0]
+    d.service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="lock_property",
+            domain="project",
+            subjectVersionIds=[original["versionId"]],
+            propertyKey="hair.design",
+            expectedEventSequence=sequence(d.service, project),
+        ),
+    )
+    with d.service.database.connect() as db:
+        candidate = d.candidate(db, project, pending["candidateId"])
+    with pytest.raises(DomainError, match="충돌"):
+        d.compile_candidate("alice", project, candidate)
+    # Other directions remain independent, and explicit unlocking restores the proposal.
+    d.service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="unlock_property",
+            domain="project",
+            subjectVersionIds=[original["versionId"]],
+            propertyKey="hair.design",
+            expectedEventSequence=sequence(d.service, project),
+        ),
+    )
+    assert (
+        d.compile_candidate("alice", project, candidate)["targetDesignVersionId"]
+        == pending["versionId"]
+    )

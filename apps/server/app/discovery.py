@@ -22,7 +22,7 @@ from .contracts import (
     RecipeInput,
     ReferenceInput,
 )
-from .discovery_planner import PART_KEYS, develop, prop, seed, signature
+from .discovery_planner import PART_KEYS, develop, prop, seed, signature, variant_label
 
 PART_NAMES = {
     "face": "얼굴",
@@ -122,6 +122,7 @@ class Discovery:
                 wrong.update(p["linkIds"])
             elif action == "keep_part":
                 c = candidates[0]
+                directions.setdefault(c["directionId"], c["candidateId"])
                 preserved.setdefault(c["directionId"], {})[p["part"]] = {
                     "linkId": p["linkIds"][0],
                     "candidateId": c["candidateId"],
@@ -163,6 +164,7 @@ class Discovery:
             "assetId": asset["asset_id"],
             "status": link["status"],
             "sourceKind": depiction["source_kind"],
+            "depictionId": depiction["depiction_id"],
             "exportPermission": json.loads(depiction["metadata_json"])[
                 "exportPermission"
             ],
@@ -224,6 +226,22 @@ class Discovery:
             "varyPart": candidate.get("varyPart"),
             "sourceCandidateId": candidate.get("sourceCandidateId"),
             "sourceLinkIds": candidate.get("sourceLinkIds", []),
+            "referenceImages": [
+                self.link(db, project, lid)
+                for lid in dict.fromkeys(
+                    [
+                        *candidate.get("sourceLinkIds", []),
+                        *[
+                            anchor["linkId"]
+                            for anchor in candidate.get("preserved", {}).values()
+                        ],
+                    ]
+                )
+            ],
+            "proposal": self.service.version(db, project, candidate["version_id"])[
+                "spec"
+            ],
+            "view": candidate.get("view", "front"),
             "image": image,
             "returnName": candidate["returnName"],
             "prompt": candidate.get("prompt"),
@@ -371,6 +389,29 @@ class Discovery:
     def compile_candidate(self, principal, project, candidate):
         with self.service.database.connect() as db:
             state = self.service.owned(db, principal, project)
+            if candidate.get("sourceVersionId") and candidate["kind"] == "design":
+                source = self.service.version(db, project, candidate["sourceVersionId"])
+                target = self.service.version(db, project, candidate["version_id"])
+                source_design = self.service.get(
+                    db, "designs", project, "design_id", source["design_id"]
+                )
+                locks = self.service.inherited_locks(
+                    db,
+                    project,
+                    source["version_id"],
+                    self.service.reduce(db, project, source_design["branch_id"])[
+                        "locks"
+                    ],
+                )
+                require(
+                    all(
+                        source["spec"]["properties"].get(key)
+                        == target["spec"]["properties"].get(key)
+                        for key in locks
+                    ),
+                    "제안 이후 확정한 보존 범위와 충돌합니다. 새 제안을 준비하거나 고급 도구에서 해당 보존을 명시적으로 해제해 주세요.",
+                    409,
+                )
             refs = self.references(
                 db,
                 project,
@@ -425,6 +466,11 @@ class Discovery:
                 ]
             if data.intent in ("focus", "observe", "correct", "adopt"):
                 require(sources, "먼저 후보를 선택해 주세요.")
+            if data.intent == "adopt":
+                require(
+                    sources and self.card(db, project, sources[0])["image"],
+                    "보관할 결과 이미지가 필요합니다.",
+                )
             if data.preservePart:
                 require(
                     sources and self.card(db, project, sources[0])["image"],
@@ -433,7 +479,7 @@ class Discovery:
             seen = {
                 signature(s.version(db, project, row[0])["spec"])
                 for row in db.execute(
-                    "SELECT version_id FROM discovery_candidates WHERE project_id=?",
+                    "SELECT version_id FROM design_versions WHERE project_id=?",
                     (project,),
                 )
             }
@@ -513,6 +559,27 @@ class Discovery:
                             source["version_id"],
                             s.reduce(db, project, lineage["branch_id"])["locks"],
                         )
+                    if data.intent == "correct":
+                        # A drifting image is not the identity target for its own correction.
+                        with s.database.connect() as db:
+                            wrong = set(effective["wrongLinks"])
+                            original = (
+                                self.candidate(db, project, source["sourceCandidateId"])
+                                if source.get("sourceCandidateId")
+                                else None
+                            )
+                            original_image = (
+                                self.card(db, project, original)["image"]
+                                if original
+                                and original["version_id"] == source["version_id"]
+                                else None
+                            )
+                            if original_image and original_image["linkId"] not in wrong:
+                                source_links = [original_image["linkId"]]
+                            else:
+                                source_links = [
+                                    lid for lid in source_links if lid not in wrong
+                                ]
                     if data.preservePart:
                         preserved[data.preservePart] = {
                             "linkId": source_links[0],
@@ -535,7 +602,7 @@ class Discovery:
                             require(
                                 sum(
                                     p.get("kind") == "correction"
-                                    and (p.get("primaryLinkId") or p.get("jobId"))
+                                    and bool(p.get("primaryLinkId") or p.get("jobId"))
                                     for p in attempts
                                 )
                                 < 2,
@@ -623,8 +690,7 @@ class Discovery:
                     label = (
                         source["label"].split(" · ")[0]
                         + " · "
-                        + PART_NAMES[part]
-                        + " 대안"
+                        + variant_label(spec, part)
                     )
                     vary = part
                     version = s.create_design(
@@ -647,7 +713,9 @@ class Discovery:
                                 "morphology": "unspecified",
                                 "properties": {
                                     "design.description": prop(
-                                        "Independent provisional character interpretation of the selected unexpected reference. Do not assume it follows the previous target."
+                                        "Independent provisional interpretation of reference "
+                                        + source_links[0]
+                                        + ". Do not assume it follows the previous target."
                                     )
                                 },
                                 "componentRelations": [],
@@ -658,10 +726,10 @@ class Discovery:
                             label = "새로 살펴볼 참고 방향"
                             kind = "inspiration"
                             direction = uid()
-                        if signature(spec) not in seen:
+                        if data.intent == "adopt" or signature(spec) not in seen:
                             break
                     require(
-                        signature(spec) not in seen,
+                        data.intent == "adopt" or signature(spec) not in seen,
                         "준비된 방향을 모두 살펴봤습니다. 저장한 방향이나 참고 이미지를 선택해 다음 대안을 발전시켜 주세요.",
                         409,
                     )
@@ -685,12 +753,24 @@ class Discovery:
                     "sourceVersionId": source["version_id"] if source else None,
                     "sourceLinkIds": source_links,
                     "owner": principal,
-                    "view": data.view
-                    if kind in ("observation", "correction")
-                    else "front",
+                    "view": data.view,
                     "needsNewResult": True,
                     "returnName": f"option-{ordinal}-{cid[:10]}.png",
                 }
+                if data.intent == "adopt":
+                    require(source_links, "보관할 결과 이미지가 필요합니다.")
+                    with s.database.connect() as db:
+                        depiction_id = self.link(db, project, source_links[0])[
+                            "depictionId"
+                        ]
+                    linked = s.create_link(
+                        principal,
+                        project,
+                        LinkInput(
+                            depictionId=depiction_id, versionId=version["version_id"]
+                        ),
+                    )
+                    payload.update(primaryLinkId=linked["linkId"], needsNewResult=False)
                 with s.database.connect() as db:
                     db.execute(
                         "INSERT INTO discovery_candidates VALUES (?,?,?,?,?,?,?)",
@@ -952,6 +1032,128 @@ class Discovery:
             )
             return rid
 
+    def from_references(self, principal, project, data):
+        """Use independent inspirations as visible provisional options, never an identity merge."""
+        s = self.service
+        with s.database.connect() as db:
+            workspace = self.workspace(db, principal, project)
+            previous = db.execute(
+                "SELECT * FROM discovery_rounds WHERE project_id=? AND request_id=?",
+                (project, data.requestId),
+            ).fetchone()
+            if previous:
+                require(
+                    previous["request_hash"] == digest(data.model_dump()),
+                    "요청 번호가 재사용되었습니다.",
+                    409,
+                )
+                return previous["round_id"]
+            require(
+                workspace["revision"] == data.expectedRevision,
+                "선택이 바뀌었습니다. 새로고침해 주세요.",
+                409,
+            )
+            references = [
+                s.get(db, "discovery_inspirations", project, "inspiration_id", iid)
+                for iid in data.inspirationIds
+            ]
+            # Repeated copies of one asset are not distinct visual directions.
+            references = list({r["asset_id"]: r for r in references}.values())
+            rid = uid()
+            ordinal = db.execute(
+                "SELECT COALESCE(MAX(ordinal),0)+1 FROM discovery_rounds WHERE project_id=?",
+                (project,),
+            ).fetchone()[0]
+            payload = {
+                "preparation": "preparing",
+                "intent": "references",
+                "explanation": "각 참고자료를 독립된 출발점으로 준비했습니다. 같은 인물이라는 뜻은 아닙니다. 마음에 드는 방향을 골라 발전시켜 보세요.",
+            }
+            db.execute(
+                "INSERT INTO discovery_rounds VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    project,
+                    rid,
+                    ordinal,
+                    data.requestId,
+                    digest(data.model_dump()),
+                    workspace["revision"],
+                    self.effective(db, project)["feedbackHash"],
+                    canonical(payload),
+                ),
+            )
+            db.execute(
+                "UPDATE discovery_workspace SET revision=revision+1,active_round_id=? WHERE project_id=?",
+                (rid, project),
+            )
+        try:
+            for position, reference in enumerate(references):
+                label = f"참고 방향 {position + 1}"
+                spec = {
+                    "morphology": "unspecified",
+                    "properties": {
+                        "design.description": prop(
+                            "Independent provisional direction from reference "
+                            + reference["asset_id"]
+                            + ". Visible parts may guide exploration; no hidden geometry or shared identity is asserted."
+                        )
+                    },
+                    "componentRelations": [],
+                    "unresolvedDecisions": [
+                        "Hidden structure and detailed character interpretation remain unspecified."
+                    ],
+                }
+                version = s.create_design(
+                    principal,
+                    project,
+                    DesignInput(title=label, spec=CanonicalInput.model_validate(spec)),
+                )
+                link = s.create_link(
+                    principal,
+                    project,
+                    LinkInput(
+                        depictionId=reference["depiction_id"],
+                        versionId=version["version_id"],
+                    ),
+                )
+                cid = uid()
+                candidate_payload = {
+                    "label": label,
+                    "purpose": payload["explanation"],
+                    "kind": "inspiration",
+                    "primaryLinkId": link["linkId"],
+                    "needsNewResult": False,
+                    "sourceLinkIds": [],
+                    "owner": principal,
+                    "returnName": f"option-{ordinal}-{cid[:10]}.png",
+                    "preserveParts": [],
+                    "preserved": {},
+                }
+                with s.database.connect() as db:
+                    db.execute(
+                        "INSERT INTO discovery_candidates VALUES (?,?,?,?,?,?,?)",
+                        (
+                            project,
+                            cid,
+                            rid,
+                            position,
+                            uid(),
+                            version["version_id"],
+                            canonical(candidate_payload),
+                        ),
+                    )
+            payload["preparation"] = "ready"
+        except (DomainError, ValueError) as exc:
+            payload.update(preparation="incomplete", error=str(exc))
+            raise
+        finally:
+            with s.database.connect() as db:
+                db.execute(
+                    "UPDATE discovery_rounds SET payload_json=? WHERE project_id=? AND round_id=?",
+                    (canonical(payload), project, rid),
+                )
+        return rid
+
     def import_results(self, principal, project, data):
         # Imported filenames supply return context, never identity approval.
         s = self.service
@@ -1049,12 +1251,19 @@ class Discovery:
                     }
                 )
             else:
+                inspiration_id = uid()
                 with s.database.connect() as db:
                     db.execute(
                         "INSERT INTO discovery_inspirations VALUES (?,?,?,?)",
-                        (project, uid(), item.assetId, dep["depictionId"]),
+                        (project, inspiration_id, item.assetId, dep["depictionId"]),
                     )
-                results.append({"candidateId": None, "assetId": item.assetId})
+                results.append(
+                    {
+                        "candidateId": None,
+                        "assetId": item.assetId,
+                        "inspirationId": inspiration_id,
+                    }
+                )
         with s.database.connect() as db:
             db.execute(
                 "INSERT INTO discovery_imports VALUES (?,?,?,?)",
@@ -1255,6 +1464,7 @@ class Discovery:
                 plan = self.compile_candidate(principal, project, candidate)
                 stored = json.loads(candidate["payload_json"])
                 stored["prompt"] = plan
+                stored.pop("error", None)
                 self.persist_candidate(project, candidate_id, stored)
                 job = await self.native.enqueue(
                     principal,
