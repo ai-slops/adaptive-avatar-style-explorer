@@ -65,6 +65,7 @@ class Exports:
                 )
                 files["character-spec.md"] = (
                     "# Character specification\n\n"
+                    + f"Revision: {version['revision']}\n\nCanonical SHA-256: {version['canonical_hash']}\n\nMorphology: {spec['morphology']}\n\n"
                     + "\n".join(
                         f"- {key}: {canonical(prop['value'])} ({prop['state']})"
                         for key, prop in spec["properties"].items()
@@ -80,6 +81,9 @@ class Exports:
                             if v["state"] == "user_confirmed"
                         },
                         "explicitPropertyLocks": effective["locks"],
+                        "preservedPropertiesForSelectedVersion": s.inherited_locks(
+                            db, project, version_id, effective["locks"]
+                        ),
                     },
                 )
                 files["unresolved-decisions.md"] = (
@@ -91,6 +95,11 @@ class Exports:
                             f"{k}: {p['state']}"
                             for k, p in spec["properties"].items()
                             if p["state"] != "user_confirmed"
+                        ]
+                        + [
+                            f"Relationship: {relation['component']} {relation['relation']} {relation['target']} ({relation['state']})"
+                            for relation in spec["componentRelations"]
+                            if relation["state"] != "user_confirmed"
                         ]
                     )
                 )
@@ -150,7 +159,32 @@ class Exports:
                     },
                 )
                 manifest = []
-                for link in evidence["links"]:
+                reference_links = [(link, True) for link in evidence["links"]]
+                included_links = {link["link_id"] for link in evidence["links"]}
+                source_ids = {
+                    source
+                    for prop in spec["properties"].values()
+                    for source in prop["sourceDepictionLinkIds"]
+                }
+                for source_id in sorted(source_ids - included_links):
+                    source = s.get(db, "depiction_links", project, "link_id", source_id)
+                    source["depiction"] = s.get(
+                        db,
+                        "depictions",
+                        project,
+                        "depiction_id",
+                        source["depiction_id"],
+                    )
+                    source["assessment"] = json.loads(source["assessment_json"])
+                    source["observations"] = [
+                        json.loads(row[0])
+                        for row in db.execute(
+                            "SELECT observed_json FROM observations WHERE project_id=? AND link_id=?",
+                            (project, source_id),
+                        )
+                    ]
+                    reference_links.append((source, False))
+                for link, current_evidence in reference_links:
                     depiction = link["depiction"]
                     asset = s.get(
                         db, "assets", project, "asset_id", depiction["asset_id"]
@@ -159,12 +193,28 @@ class Exports:
                     included = metadata["exportPermission"]
                     item = {
                         "linkId": link["link_id"],
-                        "versionId": version_id,
+                        "versionId": link["version_id"],
+                        "targetVersionId": version_id,
+                        "referenceRole": "current_version_evidence"
+                        if current_evidence
+                        else "design_decision_source",
+                        "countsAsCurrentEvidence": current_evidence,
+                        "sourceReviewSuperseded": bool(
+                            db.execute(
+                                "SELECT 1 FROM depiction_links WHERE project_id=? AND supersedes_link_id=?",
+                                (project, link["link_id"]),
+                            ).fetchone()
+                        ),
                         "assetId": asset["asset_id"],
                         "originalSha256": asset["digest"],
                         "parentAssetId": asset["parent_asset_id"],
                         "assetProvenance": json.loads(asset["provenance_json"]),
                         "reviewStatus": link["status"],
+                        "canonicalPropertyKeys": [
+                            key
+                            for key, prop in spec["properties"].items()
+                            if link["link_id"] in prop["sourceDepictionLinkIds"]
+                        ],
                         "evidenceKind": "user_reported_model_capture"
                         if depiction["source_build_id"]
                         else "2d_concept_depiction",

@@ -1,13 +1,26 @@
-import { useState } from "react";
-import type { Property, Spec, Version } from "../types";
+import { useEffect, useState } from "react";
+import type { Evidence, Property, Spec, Version } from "../types";
+import { api } from "../api";
+import {
+  CanonicalPropertyEditor,
+  PropertyDetails,
+  type SourceChoice,
+} from "./CanonicalPropertyEditor";
+import { ComponentRelationsEditor } from "./ComponentRelationsEditor";
 import { emptySpec, property, human } from "../ui";
 
 export function DesignEditor({
   current,
+  projectId,
+  branchId,
+  evidence,
   onClose,
   onSave,
 }: {
   current: Version | null;
+  projectId: string;
+  branchId: string;
+  evidence: { label: string; evidence: Evidence }[];
   onClose: () => void;
   onSave: (title: string, spec: Spec, reason: string) => Promise<void>;
 }) {
@@ -18,6 +31,54 @@ export function DesignEditor({
     [key, setKey] = useState(""),
     [value, setValue] = useState(""),
     [reason, setReason] = useState("");
+  const [unresolved, setUnresolved] = useState(
+    spec.unresolvedDecisions.join("\n"),
+  );
+  const [events, setEvents] = useState<SourceChoice[]>([]);
+  const [sourceError, setSourceError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api<{ event_id: string; sequence: number; action: string }[]>(
+      `/projects/${projectId}/events?branchId=${branchId}`,
+    )
+      .then((rows) => {
+        if (active)
+          setEvents(
+            rows.map((event) => ({
+              id: event.event_id,
+              label: `#${event.sequence} · ${human(event.action)}`,
+            })),
+          );
+      })
+      .catch((error) => {
+        if (active) setSourceError(error.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, branchId]);
+  const imageSources = [
+    ...new Map(
+      evidence.flatMap((item) =>
+        item.evidence.links.map(
+          (link) =>
+            [
+              link.link_id,
+              {
+                id: link.link_id,
+                label: `${item.label} · ${human(link.observations[0]?.observedPresentation.view ?? "unreviewed")} · ${link.status}`,
+              },
+            ] as const,
+        ),
+      ),
+    ).values(),
+  ];
+  function updateProperty(key: string, value: Property) {
+    setSpec((current) => ({
+      ...current,
+      properties: { ...current.properties, [key]: value },
+    }));
+  }
   return (
     <div className="modal-scrim">
       <section
@@ -78,60 +139,62 @@ export function DesignEditor({
                   ...spec,
                   properties: {
                     ...spec.properties,
-                    "design.description": property(e.target.value),
+                    "design.description": {
+                      ...(spec.properties["design.description"] ??
+                        property("")),
+                      value: e.target.value || null,
+                      state:
+                        spec.properties["design.description"]?.state ===
+                          "unspecified" ||
+                        !spec.properties["design.description"]
+                          ? e.target.value
+                            ? "proposed"
+                            : "unspecified"
+                          : spec.properties["design.description"].state,
+                    },
                   },
                 })
               }
               placeholder="A rounded silhouette, layered travel clothes, silver hair…"
             />
           </label>
-          <div className="property-list">
+          {spec.properties["design.description"] && (
+            <PropertyDetails
+              name="design.description"
+              value={spec.properties["design.description"]}
+              onChange={(value) => updateProperty("design.description", value)}
+              imageSources={imageSources}
+              eventSources={events}
+            />
+          )}
+          {sourceError && (
+            <p role="alert">
+              Supporting decisions could not be loaded: {sourceError}. Existing
+              sources will be preserved.
+            </p>
+          )}
+          <div className="property-list canonical-properties">
             {Object.entries(spec.properties)
-              .filter(([k]) => k !== "design.description")
-              .map(([k, p]) => (
-                <div key={k}>
-                  <strong>{human(k)}</strong>
-                  <input
-                    aria-label={`${k} value`}
-                    value={String(p.value ?? "")}
-                    onChange={(e) =>
-                      setSpec({
-                        ...spec,
-                        properties: {
-                          ...spec.properties,
-                          [k]: { ...p, value: e.target.value || null },
-                        },
-                      })
-                    }
-                  />
-                  <select
-                    aria-label={`${k} state`}
-                    value={p.state}
-                    onChange={(e) =>
-                      setSpec({
-                        ...spec,
-                        properties: {
-                          ...spec.properties,
-                          [k]: {
-                            ...p,
-                            state: e.target.value as Property["state"],
-                            value:
-                              e.target.value === "unspecified" ? null : p.value,
-                          },
-                        },
-                      })
-                    }
-                  >
-                    {[
-                      "unspecified",
-                      "proposed",
-                      "inferred",
-                      "user_confirmed",
-                    ].map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
+              .filter(([key]) => key !== "design.description")
+              .map(([key, value]) => (
+                <CanonicalPropertyEditor
+                  key={key}
+                  name={key}
+                  value={value}
+                  onChange={(value) => updateProperty(key, value)}
+                  imageSources={imageSources}
+                  eventSources={events}
+                  onRemove={() =>
+                    setSpec((current) => ({
+                      ...current,
+                      properties: Object.fromEntries(
+                        Object.entries(current.properties).filter(
+                          ([name]) => name !== key,
+                        ),
+                      ),
+                    }))
+                  }
+                />
               ))}
           </div>
           <div className="inline-inputs">
@@ -141,6 +204,7 @@ export function DesignEditor({
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
                 placeholder="hair.ornament_side"
+                maxLength={120}
               />
             </label>
             <label>
@@ -153,7 +217,9 @@ export function DesignEditor({
             </label>
             <button
               type="button"
-              disabled={!key.trim()}
+              disabled={
+                !key.trim() || Object.hasOwn(spec.properties, key.trim())
+              }
               onClick={() => {
                 setSpec({
                   ...spec,
@@ -169,19 +235,32 @@ export function DesignEditor({
               Add
             </button>
           </div>
+          {Object.hasOwn(spec.properties, key.trim()) && (
+            <p className="muted">
+              This property already exists. Edit it above.
+            </p>
+          )}
+          <ComponentRelationsEditor
+            value={spec.componentRelations}
+            onChange={(componentRelations) =>
+              setSpec({ ...spec, componentRelations })
+            }
+          />
           <label>
             Unresolved design decisions{" "}
             <small>One per line. Unknown is a useful state.</small>
             <textarea
-              value={spec.unresolvedDecisions.join("\n")}
-              onChange={(e) =>
+              value={unresolved}
+              onChange={(e) => {
+                setUnresolved(e.target.value);
                 setSpec({
                   ...spec,
                   unresolvedDecisions: e.target.value
                     .split("\n")
+                    .map((value) => value.trim())
                     .filter(Boolean),
-                })
-              }
+                });
+              }}
               placeholder="Back construction of the jacket\nHair ornament attachment"
             />
           </label>

@@ -251,9 +251,12 @@ class Service:
                 {
                     "versionId": version,
                     "spec": spec,
-                    "reason": "Branch design variation"
-                    if data.basedOnVersionId
-                    else "Initial design intent",
+                    "reason": data.reason
+                    or (
+                        "Branch design variation"
+                        if data.basedOnVersionId
+                        else "Initial design intent"
+                    ),
                     "basedOnVersionId": data.basedOnVersionId,
                 },
                 "design_intent",
@@ -914,9 +917,9 @@ class Service:
                 version_id = v
                 while version_id:
                     locks.setdefault(version_id, set()).discard(p["propertyKey"])
-                    version_id = self.version(db, project, version_id)[
-                        "parent_version_id"
-                    ]
+                    version_id = self.design_parent(
+                        db, project, self.version(db, project, version_id)
+                    )
             elif action == "reset":
                 epoch += 1
                 comparisons = []

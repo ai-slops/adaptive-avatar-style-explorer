@@ -51,7 +51,8 @@ Codex-managed caches are outside application control. Local sign-out does not
 log out the device's Codex CLI.
 
 The offline workflow supports immutable revisions, imports and user-selected crops,
-manual assessments, scoped comparisons, shortlists and property locks, history
+manual assessments, typed canonical properties and source notes, component attachment/layer
+relationships, scoped comparisons, shortlists and property locks, history
 branches, text prompt exports, prototype evidence, checkpoints and ZIP handoffs.
 
 The original community SIWC prompt-only mode remains available with

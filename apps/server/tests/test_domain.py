@@ -684,6 +684,7 @@ def test_branch_variations_retain_parent_provenance_and_locks(service, project):
         project,
         DesignInput(
             title="Branch variant",
+            reason="Keep inherited hair and explore blue clothes",
             branchId=branch,
             basedOnVersionId=original["version_id"],
             spec=CanonicalInput.model_validate(spec),
@@ -701,6 +702,10 @@ def test_branch_variations_retain_parent_provenance_and_locks(service, project):
             (project, variant["created_sequence"]),
         ).fetchone()
         assert json.loads(event[0])["basedOnVersionId"] == original["version_id"]
+        assert (
+            json.loads(event[0])["reason"]
+            == "Keep inherited hair and explore blue clothes"
+        )
     changed = variant["spec"]
     changed["properties"]["hair.color"]["value"] = "gold"
     with pytest.raises(DomainError, match="Unlock"):
@@ -715,3 +720,38 @@ def test_branch_variations_retain_parent_provenance_and_locks(service, project):
                 reason="attempt to change inherited lock",
             ),
         )
+
+    service.feedback(
+        "alice",
+        project,
+        FeedbackInput(
+            eventId=uid(),
+            action="unlock_property",
+            branchId=branch,
+            subjectVersionIds=[variant["version_id"]],
+            propertyKey="hair.color",
+            expectedEventSequence=sequence(service, project),
+        ),
+    )
+    revised = service.new_version(
+        "alice",
+        project,
+        variant["design_id"],
+        VersionInput(
+            parentVersionId=variant["version_id"],
+            spec=CanonicalInput.model_validate(changed),
+            expectedEventSequence=sequence(service, project),
+            reason="Deliberately unlock inherited hair color on this branch",
+        ),
+    )
+    assert revised["spec"]["properties"]["hair.color"]["value"] == "gold"
+    assert (
+        "hair.color"
+        in service.preferences("alice", project)["locks"][original["version_id"]]
+    )
+    assert (
+        "hair.color"
+        not in service.preferences("alice", project, branch)["locks"][
+            revised["version_id"]
+        ]
+    )

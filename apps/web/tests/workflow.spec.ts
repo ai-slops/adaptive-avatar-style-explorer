@@ -311,3 +311,170 @@ test("first browser connection remembers the plain URL and supports explicit sig
   ).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
 });
+
+test("canonical editor adopts relationships and sources without losing typed values or history", async ({
+  page,
+}) => {
+  page.setDefaultTimeout(5000);
+  await page.goto("/#launch=browser-test");
+  await expect(
+    page.getByRole("button", { name: "06 Account & privacy" }),
+  ).toBeVisible();
+  const session = await (await page.request.get("/api/session")).json();
+  const headers = {
+    origin: "http://127.0.0.1:8766",
+    "x-csrf-token": session.csrfToken,
+  };
+  const project = await (
+    await page.request.post("/api/projects", {
+      headers,
+      data: { title: "Canonical construction" },
+    })
+  ).json();
+  const base = `/api/projects/${project.project_id}`;
+  const original = await (
+    await page.request.post(base + "/designs", {
+      headers,
+      data: {
+        title: "Layered traveller",
+        spec: {
+          morphology: "humanoid",
+          properties: {
+            "design.description": {
+              value: "A travelling astronomer",
+              state: "proposed",
+              notes: "Keep the original decision provenance",
+            },
+            "body.head_ratio": { value: 0.18, state: "proposed" },
+            "face.blink_capability": { value: true, state: "proposed" },
+            "outfit.layers": { value: ["tunic", "cape"], state: "proposed" },
+          },
+        },
+      },
+    })
+  ).json();
+  const asset = await (
+    await page.request.post(base + "/assets", { headers, data: png })
+  ).json();
+  const depiction = await (
+    await page.request.post(base + "/depictions", {
+      headers,
+      data: { assetId: asset.assetId },
+    })
+  ).json();
+  const source = await (
+    await page.request.post(base + "/depiction-links", {
+      headers,
+      data: {
+        depictionId: depiction.depictionId,
+        versionId: original.version_id,
+      },
+    })
+  ).json();
+  const events = await (await page.request.get(base + "/events")).json();
+  const decision = events.find(
+    (event: { sequence: number }) =>
+      event.sequence === original.created_sequence,
+  ).event_id;
+  await page.reload();
+  await page
+    .getByRole("combobox", { name: "Project", exact: true })
+    .selectOption(project.project_id);
+  await page.getByRole("button", { name: "03 Design & evidence" }).click();
+  await page
+    .getByRole("combobox", { name: "Design version" })
+    .selectOption(original.version_id);
+  await page.getByRole("button", { name: "Revise design" }).click();
+  const editor = page.getByRole("dialog");
+  await editor
+    .getByRole("textbox", { name: "Character idea", exact: true })
+    .fill("A travelling astronomer with chosen layered clothing");
+  await editor.getByLabel("body.head_ratio value", { exact: true }).fill("0.2");
+  await editor
+    .getByLabel("face.blink_capability value", { exact: true })
+    .selectOption("false");
+  const layers = editor.getByRole("group", {
+    name: "outfit · layers",
+    exact: true,
+  });
+  const layerValue = layers.getByLabel("outfit.layers value", { exact: true });
+  await layerValue.press("ControlOrMeta+End");
+  await layerValue.press("Enter");
+  await layerValue.pressSequentially("lining");
+  await layers.getByText("Notes & sources", { exact: true }).click();
+  await layers
+    .getByLabel("outfit.layers notes", { exact: true })
+    .fill("Separate cloth layers; source is inspiration, not geometry proof.");
+  await layers
+    .getByRole("group", { name: "outfit.layers source images", exact: true })
+    .getByRole("checkbox")
+    .check();
+  await layers
+    .getByRole("group", {
+      name: "outfit.layers supporting decisions",
+      exact: true,
+    })
+    .getByRole("checkbox", {
+      name: `#${original.created_sequence} · adopt variant`,
+      exact: true,
+    })
+    .check();
+  await editor
+    .getByRole("button", { name: "Add component relationship" })
+    .click();
+  await editor
+    .getByLabel("Relationship 1 component", { exact: true })
+    .fill("cape");
+  await editor
+    .getByLabel("Relationship 1 relation", { exact: true })
+    .selectOption("layered_over");
+  await editor
+    .getByLabel("Relationship 1 target", { exact: true })
+    .fill("tunic");
+  await editor
+    .getByLabel("Relationship 1 state", { exact: true })
+    .selectOption("user_confirmed");
+  const unresolved = editor.getByLabel("Unresolved design decisions", {
+    exact: false,
+  });
+  await unresolved.fill("Rear clasp construction");
+  await unresolved.press("End");
+  await unresolved.press("Enter");
+  await unresolved.pressSequentially("Hair attachment thickness");
+  await editor
+    .getByLabel("Why this design changes")
+    .fill("Choose layered construction while keeping hidden attachments open");
+  await editor.getByRole("button", { name: "Publish new revision" }).click();
+  await expect(editor).toHaveCount(0);
+  const designs = await (await page.request.get(base + "/designs")).json();
+  const revised = designs[0].versions[0];
+  expect(designs[0].versions[1].spec).toEqual(original.spec);
+  expect(revised.spec.properties["body.head_ratio"].value).toBe(0.2);
+  expect(revised.spec.properties["face.blink_capability"].value).toBe(false);
+  expect(revised.spec.properties["outfit.layers"].value).toEqual([
+    "tunic",
+    "cape",
+    "lining",
+  ]);
+  expect(
+    revised.spec.properties["outfit.layers"].sourceDepictionLinkIds,
+  ).toEqual([source.linkId]);
+  expect(revised.spec.properties["outfit.layers"].sourceEventIds).toEqual([
+    decision,
+  ]);
+  expect(revised.spec.properties["design.description"].notes).toBe(
+    original.spec.properties["design.description"].notes,
+  );
+  expect(revised.spec.componentRelations).toEqual([
+    {
+      component: "cape",
+      relation: "layered_over",
+      target: "tunic",
+      state: "user_confirmed",
+    },
+  ]);
+  expect(revised.spec.unresolvedDecisions).toEqual([
+    "Rear clasp construction",
+    "Hair attachment thickness",
+  ]);
+});

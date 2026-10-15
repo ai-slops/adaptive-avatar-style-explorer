@@ -1455,3 +1455,42 @@ button[aria-pressed="true"] {
 .browser-connect > button {
   margin-top: 0.5rem;
 }
+
+.canonical-property,
+.component-relations-editor,
+.component-relation {
+  border: 1px solid var(--line);
+  padding: 1rem;
+  margin-block: 1rem;
+  min-width: 0;
+}
+.canonical-property legend,
+.component-relations-editor > legend {
+  font-weight: 600;
+}
+.property-provenance {
+  margin-block: 1rem;
+}
+.property-provenance select[multiple] {
+  width: 100%;
+}
+.canonical-properties > .canonical-property {
+  display: block;
+}
+.component-relation .inline-inputs {
+  flex-wrap: wrap;
+}
+
+.source-choices {
+  border: 1px solid var(--line);
+  min-width: 0;
+  margin-block: 0.75rem;
+  padding: 0.75rem;
+}
+.source-choice-list {
+  max-height: 10rem;
+  overflow: auto;
+}
+.source-choice-list .checkbox {
+  font-weight: 400;
+}

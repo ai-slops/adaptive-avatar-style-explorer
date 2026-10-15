@@ -94,6 +94,7 @@ class DesignInput(Strict):
     title: str = Field(min_length=1, max_length=120)
     branchId: str = "main"
     basedOnVersionId: str | None = None
+    reason: str | None = Field(default=None, min_length=1, max_length=2000)
     spec: CanonicalInput
 
 

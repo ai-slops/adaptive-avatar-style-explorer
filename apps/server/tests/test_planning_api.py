@@ -176,3 +176,122 @@ def test_api_bootstrap_csrf_origin_and_deletion(tmp_path):
         assert not (tmp_path / "data" / "assets" / project).exists()
         assert client.post("/api/auth/sign-out", headers=headers).status_code == 200
         assert client.get("/api/projects").status_code == 401
+
+
+def test_canonical_adoption_preserves_typed_sources_and_handoff_relations(
+    service, project, tmp_path
+):
+    from copy import deepcopy
+
+    from app.contracts import CanonicalInput, Property, VersionInput
+    from test_domain import image_bytes
+
+    original = design(service, project)
+    assets = Assets(service, tmp_path / "adoption-images")
+    asset = assets.import_image("alice", project, image_bytes())["assetId"]
+    from app.contracts import DepictionInput, LinkInput
+
+    depiction = service.create_depiction(
+        "alice", project, DepictionInput(assetId=asset, exportPermission=True)
+    )["depictionId"]
+    link = service.create_link(
+        "alice",
+        project,
+        LinkInput(depictionId=depiction, versionId=original["version_id"]),
+    )["linkId"]
+    with service.database.connect() as db:
+        event = db.execute(
+            "SELECT event_id FROM events WHERE project_id=? AND sequence=?",
+            (project, original["created_sequence"]),
+        ).fetchone()[0]
+    spec = deepcopy(original["spec"])
+    spec["properties"].update(
+        {
+            "body.head_ratio": Property(value=0.18, state="proposed").model_dump(),
+            "face.blink_capability": Property(
+                value=True, state="user_confirmed"
+            ).model_dump(),
+            "outfit.layers": Property(
+                value=["tunic", "cape"],
+                state="user_confirmed",
+                notes="Separate construction; rear clasp is a deliberate adoption",
+                sourceEventIds=[event],
+                sourceDepictionLinkIds=[link],
+            ).model_dump(),
+        }
+    )
+    spec["componentRelations"] = [
+        {
+            "component": "cape",
+            "relation": "layered_over",
+            "target": "tunic",
+            "state": "user_confirmed",
+        },
+        {
+            "component": "rear clasp",
+            "relation": "attached_to",
+            "target": "cape",
+            "state": "proposed",
+        },
+    ]
+    revised = service.new_version(
+        "alice",
+        project,
+        original["design_id"],
+        VersionInput(
+            parentVersionId=original["version_id"],
+            spec=CanonicalInput.model_validate(spec),
+            expectedEventSequence=sequence(service, project),
+            reason="Choose layered construction and retain uncertain clasp",
+        ),
+    )
+    assert (
+        service.designs("alice", project)[0]["versions"][1]["spec"] == original["spec"]
+    )
+    with service.database.connect() as db:
+        adoption = json.loads(
+            db.execute(
+                "SELECT payload_json FROM events WHERE project_id=? AND sequence=?",
+                (project, revised["created_sequence"]),
+            ).fetchone()[0]
+        )
+        assert adoption["changeSet"]["componentRelations"]["before"] == []
+        assert (
+            adoption["changeSet"]["componentRelations"]["after"]
+            == spec["componentRelations"]
+        )
+    # Historical decision sources travel with the handoff without being promoted
+    # to evidence or coverage for the revised character.
+    output = Exports(service, assets, Planning(service)).build(
+        "alice", project, revised["version_id"]
+    )
+    with zipfile.ZipFile(io.BytesIO(output)) as archive:
+        prefix = "avatar-design-handoff/"
+        saved = json.loads(archive.read(prefix + "character-spec.json"))["spec"]
+        assert saved == spec
+        assert saved["properties"]["face.blink_capability"]["value"] is True
+        assert saved["properties"]["body.head_ratio"]["value"] == 0.18
+        assert saved["properties"]["outfit.layers"]["sourceDepictionLinkIds"] == [link]
+        assert (
+            json.loads(archive.read(prefix + "component-relations.json"))
+            == spec["componentRelations"]
+        )
+        assert "rear clasp" in archive.read(prefix + "unresolved-decisions.md").decode()
+        assert (
+            revised["canonical_hash"]
+            in archive.read(prefix + "character-spec.md").decode()
+        )
+        requirements = json.loads(archive.read(prefix + "confirmed-requirements.json"))
+        assert "outfit.layers" in requirements["preservedPropertiesForSelectedVersion"]
+        manifest = json.loads(archive.read(prefix + "reference-manifest.json"))
+        assert len(manifest) == 1
+        assert manifest[0]["canonicalPropertyKeys"] == ["outfit.layers"]
+        assert manifest[0]["referenceRole"] == "design_decision_source"
+        assert manifest[0]["versionId"] == original["version_id"]
+        assert manifest[0]["targetVersionId"] == revised["version_id"]
+        assert manifest[0]["countsAsCurrentEvidence"] is False
+        assert manifest[0]["file"] in {
+            name.removeprefix(prefix) for name in archive.namelist()
+        }
+        coverage = json.loads(archive.read(prefix + "view-and-state-coverage.json"))
+        assert coverage["referenceCoverage"] == 0

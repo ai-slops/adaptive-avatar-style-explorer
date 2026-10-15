@@ -764,6 +764,14 @@ export function App() {
       {editor !== false && (
         <DesignEditor
           current={editor}
+          projectId={projectId}
+          branchId={branch}
+          evidence={allVersions
+            .filter((version) => evidence[version.version_id])
+            .map((version) => ({
+              label: `${title(version.version_id)} v${version.revision}`,
+              evidence: evidence[version.version_id],
+            }))}
           onClose={() => setEditor(false)}
           onSave={async (title, spec, reason) => {
             await run(async () => {
@@ -777,6 +785,7 @@ export function App() {
                     spec,
                     branchId: branch,
                     basedOnVersionId: editor.version_id,
+                    reason,
                   })
                 : editor
                   ? await api<Version>(
