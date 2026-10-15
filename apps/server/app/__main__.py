@@ -47,7 +47,10 @@ def main():
                 opener.cancel()
                 await asyncio.gather(opener, return_exceptions=True)
 
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
