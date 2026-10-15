@@ -49,6 +49,7 @@ class Jobs:
 
     def context(self, db, principal, project, data):
         s = self.service
+        s.owned(db, principal, project)
         version = s.version(db, project, data.versionId)
         links = []
         current = {
@@ -72,6 +73,22 @@ class Jobs:
                 {
                     "linkId": link_id,
                     "status": link["status"],
+                    "assessment": json.loads(link["assessment_json"]),
+                    "observations": [
+                        {
+                            "observationId": row["observation_id"],
+                            "featureSchemaVersion": row["feature_schema"],
+                            "extractorVersion": row["extractor_version"],
+                            "authority": "reviewed_2d_observation",
+                            "geometricVerification": "none",
+                            **json.loads(row["observed_json"]),
+                        }
+                        for row in db.execute(
+                            "SELECT * FROM observations WHERE project_id=? AND link_id=? ORDER BY rowid",
+                            (project, link_id),
+                        )
+                    ],
+                    "geometricVerification": "none",
                     "caption": json.loads(depiction["metadata_json"])["caption"],
                     "assetId": asset["asset_id"],
                     "derivativePath": str(

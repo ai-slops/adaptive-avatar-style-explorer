@@ -36,8 +36,7 @@ installation was present at initialization. This is a fresh-install implementati
 
 The [open acceptance audit](ACCEPTANCE.md) records remaining functional and
 verification gaps. In particular, hypothesis management, the complete next-action
-workflow, explicit observations in reasoning context, the full manual scenario,
-legacy migration and empirical preference evaluation are not proven complete.
+workflow, the full manual scenario, legacy migration and empirical preference evaluation are not proven complete.
 
 Canonical editing now supports typed values, provenance, notes, attachment/layer
 relationships and multi-line unresolved decisions. Historical canonical decision
@@ -45,9 +44,14 @@ sources export under their own original version and never inflate current covera
 Branch variants retain their user-authored rationale and can explicitly unlock
 inherited properties without altering parent-branch locks.
 
+Reasoning context now includes the selected current links' reviewed observations,
+assessment scope, observed presentation, observation IDs and schema/extractor
+versions. Canonical intent remains separate. Unselected images, superseded links
+and other owners' records are excluded; no geometric verification is implied.
+
 ## Current verification
 
-- 59 Python tests pass: domain/service transactions, reference numerical behavior,
+- 60 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
