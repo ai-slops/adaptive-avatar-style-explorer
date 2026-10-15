@@ -61,12 +61,12 @@ v2 empirical, legacy-v1 or live-SIWC gaps.
 
 ## Current verification
 
-- 78 Python tests pass: domain/service transactions, reference numerical behavior,
+- 79 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- Thirteen Chromium end-to-end tests pass: eight new discovery workflows plus five retained workflows through project/design creation,
+- Fourteen Chromium end-to-end tests pass: nine new discovery workflows plus five retained workflows through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
   acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
   that updates only its regional preference model. The third checks native-mode

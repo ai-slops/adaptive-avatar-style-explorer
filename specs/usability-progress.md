@@ -26,9 +26,16 @@ Delivered:
 - Desktop/narrow layout, keyboard enlargement/focus return, server invariants and
   existing-workspace regression checks.
 
-Verification: 78 Python tests, 13 Chromium browser tests, production build, Ruff
+Verification: 79 Python tests, 14 Chromium browser tests, production build, Ruff
 and whitespace checks pass. Two real native batches (four successful images total) and an actual-file
 community round trip are recorded separately from mocked failure/cancellation
 checks. The user explicitly authorized the two test reference images and ongoing
 permission for such generated test references. Final choice persistence was also
 verified on an isolated copy while the user explored the original project.
+
+
+The later user request fixes new design candidate rounds at two. Historical
+larger rounds are paged in pairs without deleting options; the current pair is
+persisted and scopes copy/export/generation. The server rejects other new-round
+counts and native batches larger than two. This override changes the earlier
+suggested breadth, not the stored live demonstration artifacts.

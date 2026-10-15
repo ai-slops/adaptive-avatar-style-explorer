@@ -347,9 +347,11 @@ class Discovery:
                 "batches": batches,
                 "nextStep": "다른 방향을 제안합니다. 이전 후보와 선택은 기록에 남습니다."
                 if effective["lastAction"] == "neither"
-                else f"저장한 {len(directions)}개 방향을 각각 발전시키고 다른 대안도 함께 제안합니다."
+                else "저장한 방향을 두 개씩 발전시킵니다. 한 번에 선택할 후보는 항상 2개입니다."
+                if len(directions) >= 2
+                else "저장한 방향을 발전시킨 후보와 다른 방향을 하나씩 제안합니다."
                 if directions
-                else "서로 다른 실루엣, 얼굴, 머리와 의상 방향을 제안합니다. 정답을 미리 설명하지 않아도 됩니다.",
+                else "서로 다른 디자인 후보 2개를 제안합니다. 정답을 미리 설명하지 않아도 됩니다.",
                 "mode": "codex_local" if self.native else "community_prompt_only",
             }
 
@@ -489,7 +491,13 @@ class Discovery:
             ).fetchone()[0]
             rid = uid()
             explanation = (
-                "저장한 방향을 각각 발전시키고 다른 대안도 함께 준비했습니다."
+                "선택한 방향을 발전시킨 서로 다른 대안 2개를 준비했습니다."
+                if sources
+                and data.intent == "continue"
+                and (data.candidateId or data.directionId)
+                else "저장한 방향을 각각 발전시킨 후보 2개를 준비했습니다."
+                if len(sources) >= 2 and data.intent == "continue"
+                else "저장한 방향의 대안과 다른 디자인을 하나씩 준비했습니다."
                 if sources and data.intent == "continue"
                 else "보존할 부분과 바꿀 부분을 구분한 새 조합입니다. 전체 결과를 다시 판단해 주세요."
                 if data.intent == "focus"
@@ -523,12 +531,17 @@ class Discovery:
         try:
             count = 1 if data.intent in ("observe", "correct", "adopt") else data.count
             for position in range(count):
-                # Always keep a genuinely different alternative in a broad development round.
+                # Two saved styles each receive a slot; a single saved style leaves room
+                # for one fresh option. Explicit development/refinement stays on its source.
                 source = (
-                    sources[position % len(sources)]
+                    sources[((ordinal - 2) * 2 + position) % len(sources)]
                     if sources
                     and (
-                        data.intent != "continue" or position < count - 1 or count == 1
+                        data.intent != "continue"
+                        or data.candidateId
+                        or data.directionId
+                        or len(sources) >= 2
+                        or position == 0
                     )
                     else None
                 )
@@ -1277,10 +1290,19 @@ class Discovery:
             )
         return results
 
-    def round_pack(self, principal, project, round_id):
+    def round_pack(self, principal, project, round_id, candidate_ids=None):
         state = self.state(principal, project)
         round = next((r for r in state["rounds"] if r["roundId"] == round_id), None)
         require(round, "후보 묶음을 찾을 수 없습니다.", 404)
+        if candidate_ids is not None:
+            ids = set(candidate_ids)
+            require(
+                0 < len(ids) <= 2 and len(ids) == len(candidate_ids),
+                "내보낼 후보는 서로 다른 2개 이하여야 합니다.",
+            )
+            chosen = [c for c in round["candidates"] if c["candidateId"] in ids]
+            require(len(chosen) == len(ids), "다른 묶음의 후보입니다.", 403)
+            round = {**round, "candidates": chosen}
         stream = io.BytesIO()
         manifest = []
         written_references = set()

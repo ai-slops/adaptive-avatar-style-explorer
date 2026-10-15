@@ -36,15 +36,15 @@ the current connection and can open Codex's login flow if needed. Credentials st
 managed by Codex; this integration does not switch to API-key billing. This mode
 is for a single-owner loopback installation.
 
-1. Choose **다양한 방향 탐색하기**, or upload several images with **참고 이미지로 시작하기**. A name and character description are optional.
+1. Choose **다양한 방향 탐색하기**, or upload several images with **참고 이미지로 시작하기**. A name and character description are optional. Every new discovery/refinement round contains exactly two proposals.
 2. In private mode, **제안한 후보 생성** opens a finite request confirmation. Choose the candidates and approve any displayed reference transmission. The available Codex default model is used unless changed.
 3. React directly to visible images, keep multiple directions, or compare two with **둘 다 더 탐색**, a relative choice, no preference, neither, or skip. Imported/generated images remain provisional.
-4. Request **다음 후보 생성 준비**. The next proposals develop the saved directions separately and retain an alternative. **부분·다른 모습** offers ordinary-language refinement, preserved parts, contextual views and correction.
+4. Request **다음 후보 생성 준비**. The next two proposals develop saved directions separately. With one saved direction, broad exploration can include one fresh alternative; **다른 방향 탐색** requests two different options. **부분·다른 모습** offers ordinary-language refinement, preserved parts, contextual views and correction.
 5. **이 디자인 사용** records a recoverable design choice with remaining gaps. Modeling acceptance criteria are a separate advanced activity.
 
 In prompt-only mode the same journey uses **묶음 프롬프트 복사** or **파일 묶음 내보내기**, external generation, and **결과 이미지 여러 장 가져오기**. Exact return filenames match automatically; ambiguous files require an explicit candidate choice or remain independent inspiration. This mode never submits image-generation work.
 
-Generation requires a new explicit finite authorization. Each selected candidate uses one Codex turn; an individual advanced analysis request uses one turn. Successful images return to their original slots. Cancellation stops remaining submissions and requests interruption of in-flight work. Already submitted work may finish or consume allowance. Failed or interrupted work is never automatically resubmitted. Retrying accepts only candidates without successful images. Reloading does not authorize any work.
+Generation requires a new explicit finite authorization. Each selected candidate uses one Codex turn; an individual advanced analysis request uses one turn. Successful images return to their original slots. Cancellation stops remaining submissions and requests interruption of in-flight work. Already submitted work may finish or consume allowance. Failed or interrupted work is never automatically resubmitted. Retrying accepts only candidates without successful images. Reloading does not authorize any work. Historical larger rounds remain intact and are displayed two candidates at a time; copy/export/generation use the currently displayed pair.
 
 **고급 작업 도구** retains manual design editing, strict evidence assessments, qualified comparisons, reasoning, prompt recipes, history branches, prototype review and modeling handoff. Discovery reactions do not become strict preference-training examples or confirm every depicted/hidden component. A design choice is separate from reference-brief preparation and actual 3D model review.
 

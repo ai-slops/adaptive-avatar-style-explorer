@@ -2274,3 +2274,14 @@ button[aria-pressed="true"] {
   margin-top: 3px;
   font-weight: 400;
 }
+.discovery-pair-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+.discovery-pair-pager > span {
+  margin-right: auto;
+}

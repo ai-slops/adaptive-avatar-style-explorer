@@ -85,8 +85,8 @@ def test_blank_round_is_diverse_provisional_and_has_actionable_pack(discovery, p
     rid = d.prepare("alice", project, request)
     assert d.prepare("alice", project, request) == rid
     options = board(d, project)
-    assert len(options) == 4 and all(c["image"] is None for c in options)
-    assert len({signature(s) for s in specs(d, project, options)}) == 4
+    assert len(options) == 2 and all(c["image"] is None for c in options)
+    assert len({signature(s) for s in specs(d, project, options)}) == 2
     assert all(
         p["state"] == "proposed"
         for s in specs(d, project, options)
@@ -94,9 +94,9 @@ def test_blank_round_is_diverse_provisional_and_has_actionable_pack(discovery, p
     )
     with zipfile.ZipFile(io.BytesIO(d.round_pack("alice", project, rid))) as pack:
         manifest = json.loads(pack.read("return-manifest.json"))
-        assert len(manifest) == 4
+        assert len(manifest) == 2
         assert (
-            len([name for name in pack.namelist() if name.startswith("option-")]) == 4
+            len([name for name in pack.namelist() if name.startswith("option-")]) == 2
         )
         assert "full_body" in options[0]["prompt"]["promptText"]
     with pytest.raises(DomainError):
@@ -128,7 +128,7 @@ def test_unreviewed_both_develops_independent_directions_and_not_losers(
     assert {c["sourceCandidateId"] for c in second[:2]} == {
         c["candidateId"] for c in first[:2]
     }
-    assert second[-1]["sourceCandidateId"] is None
+    assert len(second) == 2
     assert len(d.state("alice", project)["directions"]) == 2
     assert d.state("alice", project)["rejected"] == []
     assert {signature(s) for s in specs(d, project, first)}.isdisjoint(
@@ -162,7 +162,7 @@ def test_keep_face_change_hair_unlock_and_undo_affect_proposals(discovery, proje
         intent="focus",
         candidateId=first[0]["candidateId"],
         part="hair",
-        count=1,
+        count=2,
     )
     changed = board(d, project)[0]
     original_spec, changed_spec = specs(d, project, [first[0], changed])
@@ -184,7 +184,7 @@ def test_keep_face_change_hair_unlock_and_undo_affect_proposals(discovery, proje
         intent="focus",
         candidateId=changed["candidateId"],
         part="face",
-        count=1,
+        count=2,
     )
     unlocked_spec = specs(d, project, board(d, project))[0]
     assert "discovery.anchor_face" not in unlocked_spec["properties"]
@@ -220,7 +220,7 @@ def test_choice_is_frozen_with_gaps_and_explicit_replacement(discovery, project)
     assert snapshot["geometricVerification"] == "none"
     assert snapshot["uncheckedViews"]
     assert d.react("alice", project, chosen) == payload
-    prepare(d, project, intent="different", count=1)
+    prepare(d, project, intent="different", count=2)
     assert d.state("alice", project)["selection"] == snapshot
     with pytest.raises(DomainError, match="교체"):
         reaction(d, project, "use_design", [first[1]])
@@ -292,7 +292,7 @@ def test_feedback_evidence_cannot_cross_candidate_or_owner(discovery, project):
 
 def test_community_has_no_generation_and_reload_does_not_submit(discovery, project):
     async def scenario():
-        prepare(discovery, project, count=1)
+        prepare(discovery, project, count=2)
         c = board(discovery, project)[0]
         request = DiscoveryGenerationInput(
             requestId=uid(), candidateIds=[c["candidateId"]], authorizeTurns=1
@@ -334,29 +334,29 @@ def test_native_finite_batch_partial_failure_and_explicit_missing_retry(
             PartialCodex,
         )
         d = Discovery(service, assets, Planning(service), native)
-        prepare(d, project, count=3)
+        prepare(d, project, count=2)
         first = board(d, project)
         data = DiscoveryGenerationInput(
             requestId=uid(),
             candidateIds=[c["candidateId"] for c in first],
-            authorizeTurns=3,
+            authorizeTurns=2,
         )
         batch = await d.generate("alice", project, first[0]["roundId"], data)
         assert await d.generate("alice", project, first[0]["roundId"], data) == batch
         await asyncio.wait_for(d.tasks[batch], 5)
         results = board(d, project)
-        assert [bool(c["image"]) for c in results] == [True, False, True], d.state(
+        assert [bool(c["image"]) for c in results] == [True, False], d.state(
             "alice", project
         )["batches"]
         assert [c["candidateId"] for c in results] == [c["candidateId"] for c in first]
-        assert PartialCodex.calls == 3
+        assert PartialCodex.calls == 2
         retry = DiscoveryGenerationInput(
             requestId=uid(), candidateIds=[results[1]["candidateId"]], authorizeTurns=1
         )
         retry_batch = await d.generate("alice", project, first[0]["roundId"], retry)
         await asyncio.wait_for(d.tasks[retry_batch], 5)
         assert all(c["image"] for c in board(d, project))
-        assert PartialCodex.calls == 4
+        assert PartialCodex.calls == 3
         with pytest.raises(DomainError, match="이미 결과"):
             await d.generate(
                 "alice",
@@ -419,11 +419,11 @@ def test_changed_favorite_changes_intended_design_and_reference(discovery, proje
     prepare(d, project)
     first = returned(d, project, board(d, project))
     liked_a, _ = reaction(d, project, "interest", [first[0]])
-    prepare(d, project, count=1)
+    prepare(d, project, count=2)
     result_a = board(d, project)[0]
     reaction(d, project, "undo", targetReactionId=liked_a.requestId)
     reaction(d, project, "interest", [first[1]])
-    prepare(d, project, count=1)
+    prepare(d, project, count=2)
     result_b = board(d, project)[0]
     a, b = specs(d, project, [result_a, result_b])
     assert a["properties"]["face.design"] != b["properties"]["face.design"]
@@ -435,10 +435,10 @@ def test_reference_export_uses_selected_source_permission_and_no_duplicate_paths
     discovery, project
 ):
     d = discovery
-    prepare(d, project, count=1)
+    prepare(d, project, count=2)
     first = returned(d, project, board(d, project))[0]
     reaction(d, project, "interest", [first])
-    rid = prepare(d, project, count=3)
+    rid = prepare(d, project, count=2)
     with zipfile.ZipFile(io.BytesIO(d.round_pack("alice", project, rid))) as pack:
         manifest = json.loads(pack.read("return-manifest.json"))
         assert any(c["references"] for c in manifest)
@@ -464,7 +464,7 @@ def test_reference_export_uses_selected_source_permission_and_no_duplicate_paths
     d.activate("alice", project, first["roundId"])
     permitted = board(d, project)[0]
     reaction(d, project, "interest", [permitted])
-    rid = prepare(d, project, count=3)
+    rid = prepare(d, project, count=2)
     with zipfile.ZipFile(io.BytesIO(d.round_pack("alice", project, rid))) as pack:
         files = [n for n in pack.namelist() if n.startswith("references/")]
         assert files == [f"references/{asset}.png"]
@@ -473,10 +473,10 @@ def test_reference_export_uses_selected_source_permission_and_no_duplicate_paths
 def test_native_reference_consent_is_required_before_scheduling(discovery, project):
     async def scenario():
         d = discovery
-        prepare(d, project, count=1)
+        prepare(d, project, count=2)
         first = returned(d, project, board(d, project))[0]
         reaction(d, project, "interest", [first])
-        prepare(d, project, count=1)
+        prepare(d, project, count=2)
         second = board(d, project)[0]
         d.native = object()  # No operation may reach a provider without consent.
         with pytest.raises(DomainError, match="전송"):
@@ -519,7 +519,7 @@ def test_inflight_cancel_stops_remaining_and_restart_never_resubmits(
             WaitingCodex,
         )
         d = Discovery(service, assets, Planning(service), native)
-        prepare(d, project, count=3)
+        prepare(d, project, count=2)
         candidates = board(d, project)
         batch = await d.generate(
             "alice",
@@ -528,7 +528,7 @@ def test_inflight_cancel_stops_remaining_and_restart_never_resubmits(
             DiscoveryGenerationInput(
                 requestId=uid(),
                 candidateIds=[c["candidateId"] for c in candidates],
-                authorizeTurns=3,
+                authorizeTurns=2,
             ),
         )
         task = d.tasks[batch]
@@ -652,7 +652,7 @@ def test_views_correction_anchors_and_unexpected_adoption_do_not_reject_design(
     discovery, project
 ):
     d = discovery
-    prepare(d, project, count=1)
+    prepare(d, project, count=2)
     original = returned(d, project, board(d, project))[0]
     prepare(
         d,
@@ -699,7 +699,7 @@ def test_later_confirmed_lock_blocks_an_already_prepared_conflicting_variant(
     from test_domain import sequence
 
     d = discovery
-    prepare(d, project, count=1)
+    prepare(d, project, count=2)
     original = returned(d, project, board(d, project))[0]
     reaction(d, project, "interest", [original])
     prepare(
@@ -708,7 +708,7 @@ def test_later_confirmed_lock_blocks_an_already_prepared_conflicting_variant(
         intent="focus",
         candidateId=original["candidateId"],
         part="hair",
-        count=1,
+        count=2,
     )
     pending = board(d, project)[0]
     d.service.feedback(
@@ -744,3 +744,34 @@ def test_later_confirmed_lock_blocks_an_already_prepared_conflicting_variant(
         d.compile_candidate("alice", project, candidate)["targetDesignVersionId"]
         == pending["versionId"]
     )
+
+
+def test_two_candidate_contract_and_legacy_pair_export(discovery, project):
+    from pydantic import ValidationError
+
+    for count in (1, 3, 4, 6):
+        with pytest.raises(ValidationError):
+            DiscoveryRoundInput(requestId=uid(), expectedRevision=0, count=count)
+    d = discovery
+    # Preserve old round records; the new API cannot create four-option rounds.
+    legacy = DiscoveryRoundInput.model_construct(
+        requestId=uid(), expectedRevision=0, count=4
+    )
+    rid = d.prepare("alice", project, legacy)
+    previous = board(d, project)
+    assert len(previous) == 4
+    selected = [c["candidateId"] for c in previous[2:]]
+    with zipfile.ZipFile(
+        io.BytesIO(d.round_pack("alice", project, rid, selected))
+    ) as pack:
+        manifest = json.loads(pack.read("return-manifest.json"))
+        assert [c["candidateId"] for c in manifest] == selected
+    assert len(d.state("alice", project)["rounds"][0]["candidates"]) == 4
+    prepare(d, project)
+    assert len(board(d, project)) == 2
+    with pytest.raises(ValidationError):
+        DiscoveryGenerationInput(
+            requestId=uid(),
+            candidateIds=[c["candidateId"] for c in previous],
+            authorizeTurns=4,
+        )

@@ -82,6 +82,20 @@ export function Discovery({
   const [connection, setConnection] = useState<string>(
     codex ? "접속 확인 중" : "외부 생성 후 가져오기",
   );
+  const [pairOffsets, setPairOffsets] = useState<Record<string, number>>(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem("avatar.discoveryPairs") ?? "{}",
+      );
+      return Object.fromEntries(
+        Object.entries(saved)
+          .filter(([, value]) => Number.isInteger(value) && Number(value) >= 0)
+          .map(([key, value]) => [key, Number(value)]),
+      );
+    } catch {
+      return {};
+    }
+  });
   const [loadedLinks, setLoadedLinks] = useState<Record<string, string>>({});
   const [compare, setCompare] = useState<string[]>([]),
     [focused, setFocused] = useState(false);
@@ -122,11 +136,34 @@ export function Discovery({
   );
   const currentBatches =
     state?.batches.filter((b) => b.roundId === round?.roundId) ?? [];
+  const pairKey = `${pid}:${round?.roundId ?? ""}`;
+  const pairStart = Math.min(
+    pairOffsets[pairKey] ?? 0,
+    Math.max(0, (round?.candidates.length ?? 0) - 2),
+  );
+  const pairCandidates =
+    round?.candidates.slice(pairStart, pairStart + 2) ?? [];
+  const acquisitionRound = round
+    ? { ...round, candidates: pairCandidates }
+    : undefined;
   const visible = focused
     ? compare
         .map((id) => allCandidates.find((c) => c.candidateId === id))
         .filter((c): c is Candidate => !!c)
-    : (round?.candidates ?? []);
+    : pairCandidates;
+  function movePair(offset: number) {
+    const next = {
+      ...pairOffsets,
+      [pairKey]: Math.max(
+        0,
+        Math.min(offset, Math.max(0, (round?.candidates.length ?? 0) - 2)),
+      ),
+    };
+    setPairOffsets(next);
+    localStorage.setItem("avatar.discoveryPairs", JSON.stringify(next));
+    setFocused(false);
+    setCompare([]);
+  }
   const selectedDirections = new Set(
     state?.directions.map((d) => d.candidate.candidateId),
   );
@@ -517,7 +554,7 @@ export function Discovery({
                           prepare({
                             candidateId: c.candidateId,
                             intent: "continue",
-                            count: 3,
+                            count: 2,
                           }),
                         )
                       }
@@ -666,8 +703,8 @@ export function Discovery({
         />
         <p className="discovery-note">
           {codex
-            ? "후보 4개를 먼저 제안합니다. 이미지 생성은 다음 화면에서 횟수를 확인하고 요청합니다."
-            : "후보 4개의 프롬프트를 준비합니다. 외부 도구에서 생성한 이미지를 한 번에 가져올 수 있습니다."}
+            ? "후보 2개를 먼저 제안합니다. 이미지 생성은 다음 화면에서 횟수를 확인하고 요청합니다."
+            : "후보 2개의 프롬프트를 준비합니다. 외부 도구에서 생성한 이미지를 한 번에 가져올 수 있습니다."}
         </p>
         {busy && <p role="status">출발점을 준비하고 있습니다…</p>}
         {error && (
@@ -913,7 +950,7 @@ export function Discovery({
                           prepare({
                             candidateId: d.candidate.candidateId,
                             intent: "continue",
-                            count: 3,
+                            count: 2,
                           }),
                         )
                       }
@@ -1010,6 +1047,29 @@ export function Discovery({
           </button>
         </div>
       )}
+      {!focused && round && round.candidates.length > 2 && (
+        <div
+          className="discovery-pair-pager"
+          aria-label="기존 후보 두 개씩 보기"
+        >
+          <span>
+            기존 기록 {round.candidates.length}개 중 {pairStart + 1}–
+            {Math.min(pairStart + 2, round.candidates.length)}번째
+          </span>
+          <button
+            disabled={pairStart === 0}
+            onClick={() => movePair(pairStart - 2)}
+          >
+            기록의 이전 2개
+          </button>
+          <button
+            disabled={pairStart + 2 >= round.candidates.length}
+            onClick={() => movePair(pairStart + 2)}
+          >
+            기록의 다음 2개
+          </button>
+        </div>
+      )}
       <div
         className={`discovery-board count-${visible.length} ${focused ? "focused" : ""}`}
       >
@@ -1054,15 +1114,15 @@ export function Discovery({
           <p>{state?.nextStep}</p>
         </div>
         <div className="discovery-next-actions">
-          {round &&
-            round.candidates.some((c) => !c.image) &&
+          {acquisitionRound &&
+            acquisitionRound.candidates.some((c) => !c.image) &&
             (codex ? (
               <button
                 className="primary"
                 disabled={busy || !!activeBatch}
-                onClick={() => showGeneration(round)}
+                onClick={() => showGeneration(acquisitionRound!)}
               >
-                {round.candidates.some((c) => c.image || c.error)
+                {acquisitionRound.candidates.some((c) => c.image || c.error)
                   ? "남은 후보 생성·재시도"
                   : "제안한 후보 생성"}
               </button>
@@ -1071,7 +1131,7 @@ export function Discovery({
                 <button
                   className="primary"
                   disabled={busy}
-                  onClick={() => void run(() => copyRound(round))}
+                  onClick={() => void run(() => copyRound(acquisitionRound!))}
                 >
                   묶음 프롬프트 복사
                 </button>
@@ -1080,8 +1140,12 @@ export function Discovery({
                   onClick={() =>
                     void run(() =>
                       download(
-                        base + `/rounds/${round.roundId}/export`,
-                        {},
+                        base + `/rounds/${acquisitionRound.roundId}/export`,
+                        {
+                          candidateIds: pairCandidates.map(
+                            (c) => c.candidateId,
+                          ),
+                        },
                         "discovery-prompts.zip",
                       ),
                     )
@@ -1528,12 +1592,12 @@ export function Discovery({
                   intent: "focus",
                   part,
                   ...(preserve ? { preservePart: preserve } : {}),
-                  count: 3,
+                  count: 2,
                 }),
               )
             }
           >
-            이 범위로 대안 3개 준비
+            이 범위로 대안 2개 준비
           </button>
           <hr />
           <p>
@@ -1618,7 +1682,7 @@ export function Discovery({
                     intent: "focus",
                     part: "outfit",
                     view: "back",
-                    count: 3,
+                    count: 2,
                   }),
                 )
               }

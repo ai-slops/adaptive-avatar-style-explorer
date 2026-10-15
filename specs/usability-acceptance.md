@@ -5,6 +5,24 @@ A01–22. Its default journey takes precedence over v2's numbered management scr
 and verification-first scheduling. It does not remove strict qualification from
 advanced comparisons or make a rendered image proof of a 3D model.
 
+## Later user override: two candidates
+
+The user's subsequent instruction, **“선택 후보를 2개로 고정해줘”**, supersedes the
+addendum's illustrative four-to-six counts. Every new discovery/design-refinement
+round now prepares exactly **two** candidates, and native batches accept at most
+two pending candidates. Single-design observations/corrections remain contextual
+views rather than fabricated extra style choices. Reference/library material and
+historical larger rounds are retained; the board pages those records two at a
+time, persists the selected pair across reload, and exports/generates only that
+pair. When two directions are kept, each receives one development slot. With one
+saved direction, broad exploration can include a fresh alternative. Explicit
+**다른 방향 탐색** remains available.
+
+The new contract and legacy-pair export are service-tested; an additional browser
+walkthrough verifies two-card paging, recovery and pair-only export without
+truncating the old four-candidate record. Counts in the actual demonstrations
+below describe the historical runs before this override and have not been rewritten.
+
 ## Implemented journey
 
 The default Korean workspace starts with **다양한 방향 탐색하기** or a multi-image
@@ -24,10 +42,10 @@ provider/account settings, technical history and modeling handoff remain accessi
 ## Reproducible workflow checks
 
 - `apps/server/tests/test_discovery.py`: service invariants and controlled proposal
-  fixtures. The complete Python suite contains **78 passing tests**.
-- `apps/web/tests/discovery.spec.ts`: eight Chromium discovery walkthroughs.
+  fixtures. The complete Python suite contains **79 passing tests**.
+- `apps/web/tests/discovery.spec.ts`: nine Chromium discovery walkthroughs.
 - `apps/web/tests/workflow.spec.ts`: five retained Chromium management/authentication
-  walkthroughs. **All 13 browser tests pass**, with one worker because the native
+  walkthroughs. **All 14 browser tests pass**, with one worker because the native
   fixture represents a single installation owner.
 - TypeScript/Vite production build, Ruff checks/format and Git whitespace checks pass.
 
@@ -41,7 +59,7 @@ results, live SIWC availability or perceptual extraction accuracy.
 | A01 | Blank-project browser walkthroughs in both modes prepare proposals without a design editor. Native confirmation discloses a finite count; community exports usable starter instructions and return filenames. |
 | A02 | Bulk-reference browser/service checks create independent, unreviewed directions without names or identity grouping. Repeated copies of the same asset do not inflate the visible direction count. |
 | A03 | Unreviewed imports accept immediate reactions. Frozen shown evidence and the exploratory classification are retained; no observations or strict comparison events are invented. |
-| A04 | The community walkthrough retains two directions and prepares separate descendants plus a different option. Unselected options remain neutral. |
+| A04 | The community walkthrough retains two directions and prepares one descendant for each direction. A fresh alternative remains available through broad/single-direction exploration or the explicit different-direction action. Unselected options remain neutral. |
 | A05 | Neither/none, recoverable direction change and undo are checked in browser/service workflows. No least-bad winner or project reset is required. |
 | A06 | Focused A/B, both, no preference, neither and skip act on the images actually shown, without internal IDs or a seal step. Existing strict sealed comparisons remain advanced. |
 | A07 | Face preservation followed by different hair is checked through the ordinary-language dialog and canonical/reference assertions. Temporary anchors remain proposed; confirmed source locks are checked again before execution. |

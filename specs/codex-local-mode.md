@@ -50,7 +50,7 @@ References:
 
 The [usability addendum](usability-addendum.md), UX-12, permits a single explicit
 confirmation for a finite displayed set (one turn per selected candidate, at most
-six). This orchestrates the same native single-turn worker; it does not authorize
+two, following the user's later fixed-pair instruction). This orchestrates the same native single-turn worker; it does not authorize
 an open-ended agent loop. References require explicit transmission consent,
 completed candidates cannot be retried, cancellation prevents later submissions,
 and process restart never automatically resubmits the batch. Models remain a

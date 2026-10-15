@@ -19,7 +19,7 @@ class DiscoveryRoundInput(Strict):
     preservePart: Part | None = None
     view: Literal["front", "character_left_profile", "back"] = "front"
     brief: str = Field(default="", max_length=2000)
-    count: int = Field(default=4, ge=1, le=6)
+    count: Literal[2] = 2
 
 
 class DiscoveryReactionInput(Strict):
@@ -95,8 +95,8 @@ class DiscoveryImportInput(Strict):
 
 class DiscoveryGenerationInput(Strict):
     requestId: str = Field(min_length=1, max_length=100)
-    candidateIds: list[str] = Field(min_length=1, max_length=6)
-    authorizeTurns: int = Field(ge=1, le=6)
+    candidateIds: list[str] = Field(min_length=1, max_length=2)
+    authorizeTurns: int = Field(ge=1, le=2)
     approveReferenceTransmission: bool = False
     exportPermission: bool = False
     model: str | None = Field(default=None, min_length=1, max_length=200)
@@ -132,3 +132,7 @@ class DiscoveryReferencesInput(Strict):
         if len(self.inspirationIds) != len(set(self.inspirationIds)):
             raise ValueError("Choose each reference once")
         return self
+
+
+class DiscoveryExportInput(Strict):
+    candidateIds: list[str] = Field(default_factory=list, max_length=2)

@@ -46,6 +46,7 @@ from .contracts import (
 from .discovery import Discovery
 from .discovery_contracts import (
     DiscoveryActiveRound,
+    DiscoveryExportInput,
     DiscoveryGenerationInput,
     DiscoveryImportInput,
     DiscoveryLibraryInput,
@@ -570,9 +571,16 @@ def create_app(
         return discovery.import_results(request.state.principal, p, data)
 
     @app.post("/api/projects/{p}/discovery/rounds/{r}/export")
-    def discovery_export(p: str, r: str, request: Request):
+    def discovery_export(
+        p: str, r: str, request: Request, data: DiscoveryExportInput | None = None
+    ):
         return Response(
-            discovery.round_pack(request.state.principal, p, r),
+            discovery.round_pack(
+                request.state.principal,
+                p,
+                r,
+                data.candidateIds if data and data.candidateIds else None,
+            ),
             media_type="application/zip",
             headers={
                 "Content-Disposition": 'attachment; filename="discovery-prompts.zip"'

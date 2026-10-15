@@ -108,7 +108,7 @@ test("community discovery completes feedback-informed second round and chooses w
   });
   await fresh(page);
   await page.getByRole("button", { name: "다양한 방향 탐색하기" }).click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(card(page)).toHaveCount(2);
   await expect(
     card(page).first().getByRole("button", { name: "이런 방향 더 보기" }),
   ).toHaveCount(0);
@@ -141,18 +141,21 @@ test("community discovery completes feedback-informed second round and chooses w
   await page
     .getByRole("button", { name: "다음 프롬프트 준비", exact: true })
     .click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(page.locator(".discovery-round-bar strong")).toHaveText(
+    "2번째 후보 묶음",
+  );
+  await expect(card(page)).toHaveCount(2);
   const secondState = await state(page);
   const second = secondState.rounds[0];
   expect(
     second.candidates.slice(0, 2).map((c: any) => c.sourceCandidateId),
   ).toEqual(initial.candidates.slice(0, 2).map((c: any) => c.candidateId));
-  expect(second.candidates[3].sourceCandidateId).toBeNull();
+  expect(second.candidates).toHaveLength(2);
   expect(
     second.candidates[0].proposal.properties["hair.design"].value,
   ).not.toBe(initial.candidates[0].proposal.properties["hair.design"].value);
   await page.reload();
-  await expect(card(page)).toHaveCount(4);
+  await expect(card(page)).toHaveCount(2);
   expect((await state(page)).activeRoundId).toBe(second.roundId);
   await returnImages(page);
   await card(page).first().getByText("부분·다른 모습", { exact: true }).click();
@@ -168,7 +171,7 @@ test("community discovery completes feedback-informed second round and chooses w
     refine.getByRole("button", { name: "얼굴·턱 보존 해제", exact: true }),
   ).toBeVisible();
   await refine.getByLabel("바꿔 보고 싶은 부분").selectOption("hair");
-  await refine.getByRole("button", { name: "이 범위로 대안 3개 준비" }).click();
+  await refine.getByRole("button", { name: "이 범위로 대안 2개 준비" }).click();
   await expect(refine).not.toBeVisible();
   const focused = (await state(page)).rounds[0];
   expect(
@@ -239,7 +242,10 @@ test("multiple inspirations start independent directions and ambiguous returns r
   await page
     .getByRole("button", { name: "다음 프롬프트 준비", exact: true })
     .click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(page.locator(".discovery-round-bar strong")).toHaveText(
+    "2번째 후보 묶음",
+  );
+  await expect(card(page)).toHaveCount(2);
   await page
     .getByLabel("결과 이미지 파일", { exact: true })
     .setInputFiles({ name: "unknown.png", mimeType: "image/png", buffer: png });
@@ -279,16 +285,6 @@ test("native discovery uses bounded rounds, preserves slots and never resubmits 
   });
   // A finite two-option allowance is valid for a constrained generation budget.
   await dialog
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(3)
-    .uncheck();
-  await dialog
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(2)
-    .uncheck();
-  await dialog
     .getByRole("button", { name: "2회 요청하고 생성 시작", exact: true })
     .click();
   await expect(card(page).nth(0).getByRole("img")).toBeVisible();
@@ -303,7 +299,7 @@ test("native discovery uses bounded rounds, preserves slots and never resubmits 
     .first()
     .getByRole("button", { name: "이런 방향 더 보기", exact: true })
     .click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(card(page)).toHaveCount(2);
   expect(
     await card(page).evaluateAll((nodes) =>
       nodes.map((n) => n.getAttribute("data-candidate")),
@@ -319,16 +315,6 @@ test("native discovery uses bounded rounds, preserves slots and never resubmits 
     name: "이번 후보 생성 확인",
     exact: true,
   });
-  await dialog
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(3)
-    .uncheck();
-  await dialog
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(2)
-    .uncheck();
   await expect(
     dialog.getByRole("button", { name: "2회 요청하고 생성 시작", exact: true }),
   ).toBeDisabled();
@@ -409,18 +395,12 @@ test("partial native results can retry only missing work, cancel, and retain bro
     exact: true,
   });
   await modal
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(3)
-    .uncheck();
-  await modal
-    .getByRole("button", { name: "3회 요청하고 생성 시작", exact: true })
+    .getByRole("button", { name: "2회 요청하고 생성 시작", exact: true })
     .click();
   await expect(
-    page.getByText("요청 처리 완료 · 3/3회 처리", { exact: true }),
+    page.getByText("요청 처리 완료 · 2/2회 처리", { exact: true }),
   ).toBeVisible();
   await expect(card(page).nth(0).getByRole("img")).toBeVisible();
-  await expect(card(page).nth(2).getByRole("img")).toBeVisible();
   await expect(
     card(page)
       .nth(1)
@@ -439,12 +419,7 @@ test("partial native results can retry only missing work, cancel, and retain bro
     modal
       .getByRole("group", { name: "이번에 만들 후보" })
       .getByRole("checkbox"),
-  ).toHaveCount(2);
-  await modal
-    .getByRole("group", { name: "이번에 만들 후보" })
-    .getByRole("checkbox")
-    .nth(1)
-    .uncheck();
+  ).toHaveCount(1);
   await modal
     .getByRole("button", { name: "1회 요청하고 생성 시작", exact: true })
     .click();
@@ -454,18 +429,18 @@ test("partial native results can retry only missing work, cancel, and retain bro
   );
   expect(
     (await (await page.request.get(origin + "/fixture/codex")).json()).calls,
-  ).toBe(4);
+  ).toBe(3);
   await configure({ delay: 5 });
   await page
     .getByRole("button", { name: "다른 방향 탐색", exact: true })
     .click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(card(page)).toHaveCount(2);
   await page
     .getByRole("button", { name: "제안한 후보 생성", exact: true })
     .click();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "4회 요청하고 생성 시작", exact: true })
+    .getByRole("button", { name: "2회 요청하고 생성 시작", exact: true })
     .click();
   await page
     .getByRole("button", { name: "남은 생성 취소", exact: true })
@@ -487,7 +462,7 @@ test("partial native results can retry only missing work, cancel, and retain bro
   ).toBeVisible();
   await page.getByText("이전 묶음", { exact: true }).click();
   await page
-    .getByRole("button", { name: "1번째 · 3/4개 이미지", exact: true })
+    .getByRole("button", { name: "1번째 · 2/2개 이미지", exact: true })
     .click();
   await expect(card(page).first().getByRole("img")).toBeVisible();
   await card(page)
@@ -559,7 +534,10 @@ test("preservation is reversible, neither changes direction, and undo restores c
   await page
     .getByRole("button", { name: "다음 프롬프트 준비", exact: true })
     .click();
-  await expect(card(page)).toHaveCount(4);
+  await expect(page.locator(".discovery-round-bar strong")).toHaveText(
+    "2번째 후보 묶음",
+  );
+  await expect(card(page)).toHaveCount(2);
   const different = await state(page);
   expect(
     different.rounds[0].candidates.every((c: any) => !c.sourceCandidateId),
@@ -684,4 +662,59 @@ test("an image must load before it can receive a visual preference", async ({
     release();
     await page.unrouteAll({ behavior: "wait" });
   }
+});
+
+test("legacy rounds keep every candidate but display and export only the selected pair", async ({
+  page,
+}) => {
+  await fresh(page);
+  await page.getByRole("button", { name: "다양한 방향 탐색하기" }).click();
+  await expect(card(page)).toHaveCount(2);
+  const pid = await page.locator("#project").inputValue();
+  const session = await (await page.request.get("/api/session")).json();
+  const response = await page.request.post("/api/fixture/legacy-round", {
+    headers: {
+      origin: "http://127.0.0.1:8766",
+      "x-csrf-token": session.csrfToken,
+    },
+    data: { projectId: pid },
+  });
+  expect(response.ok()).toBe(true);
+  await page.reload();
+  await expect(card(page)).toHaveCount(2);
+  const legacy = (await state(page)).rounds[0];
+  expect(legacy.candidates).toHaveLength(4);
+  await page
+    .getByRole("button", { name: "기록의 다음 2개", exact: true })
+    .click();
+  const shown = await card(page).evaluateAll((nodes) =>
+    nodes.map((n) => n.getAttribute("data-candidate")),
+  );
+  expect(shown).toEqual(
+    legacy.candidates.slice(2).map((c: any) => c.candidateId),
+  );
+  await page.reload();
+  await expect(card(page)).toHaveCount(2);
+  expect(
+    await card(page).evaluateAll((nodes) =>
+      nodes.map((n) => n.getAttribute("data-candidate")),
+    ),
+  ).toEqual(shown);
+  const request = page.waitForRequest(
+    (r) => r.method() === "POST" && r.url().endsWith("/export"),
+  );
+  const download = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "파일 묶음 내보내기", exact: true })
+    .click();
+  expect((await request).postDataJSON().candidateIds).toEqual(shown);
+  await download;
+  expect((await state(page)).rounds[0].candidates).toHaveLength(4);
+  await page
+    .getByRole("button", { name: "다른 방향 탐색", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "기록의 다음 2개", exact: true }),
+  ).toHaveCount(0);
+  expect((await state(page)).rounds[0].candidates).toHaveLength(2);
 });
