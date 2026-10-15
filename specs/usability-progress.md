@@ -3,67 +3,32 @@
 Requirements: [usability-addendum.md](usability-addendum.md), copied unchanged from
 `.local/adaptive-avatar-style-explorer-usability-addendum.en.md`.
 
-## Current delivery boundary
+The server and default browser journey are now connected. The temporary stop after
+the initial server commit was superseded by the user's instruction to finish the
+new requirements. See [the A01–A22 acceptance record](usability-acceptance.md) for
+checks, concrete demonstrations and provider/visual-quality limits.
 
-This commit supplies the **server-side discovery workflow**, alongside the existing
-advanced workspace. It does **not** complete the usability addendum or its release
-gate. The default browser interface is unchanged. Work stops after this commit at
-the user's requested checkpoint.
+Delivered:
 
-Implemented server behavior:
+- No-specification onboarding, multi-reference independent starting points, diverse
+  provisional designs and an image-first Korean workspace.
+- Direct reactions and focused comparison from visible unreviewed images, multiple
+  saved directions, ordinary-language preservation/refinement, reversible choices,
+  and feedback-informed intended design changes distinct from strict training.
+- Contextual alternate views, faithful-design alternatives, bounded corrections,
+  and independent adoption of an unexpected depiction.
+- Native finite acquisition with default model, disclosed references, progress,
+  partial success, explicit missing-only retry and cancellation; prompt-only
+  round export/copy, explicit matching and partial/delayed external return.
+- Persistent rounds/slots/directions, historical outputs, chosen-design snapshots
+  with honest gaps, and existing-library continuation without invented history.
+- Advanced authoring/review/provider/handoff tools preserved behind disclosure.
+- Desktop/narrow layout, keyboard enlargement/focus return, server invariants and
+  existing-workspace regression checks.
 
-- Prepare distinct, provisional character proposals from a blank project without
-  manual design authoring. Plans contain actual character instructions, not images.
-- Save exploratory reactions with the exact depicted evidence separately from
-  qualified preference training. Save multiple directions, preserve a visible part,
-  undo a decision, and use corrected decisions in subsequent design proposals.
-- Record an immutable chosen-design snapshot with automatically retained evidence
-  gaps, independently of modeling acceptance criteria. Replacing a different chosen
-  design requires an explicit flag; prior snapshots remain in reaction history.
-- Persist rounds and candidate positions, accept partial external returns by exact
-  return filename or explicit association, and retain ambiguous images as independent
-  inspiration when explicitly requested. Existing designs can be selected from a
-  library without inventing prior discovery rounds or preferences.
-- Export a round's prompts, return manifest, and permitted selected-source reference
-  files. Exporting does not authorize generation or reference transmission.
-- In private mode, explicitly authorize a finite native batch. Each result returns
-  to its original slot. Failures leave successful results accessible; a new explicit
-  retry accepts only candidates without successful images. Reference transmission
-  requires consent. Cancellation stops remaining submissions. Restart marks pending
-  batches interrupted rather than resubmitting them.
-- Community mode exposes no discovery image-generation route.
-
-## Verification and limits
-
-`apps/server/tests/test_discovery.py` verifies the server workflow using synthetic
-fixture images and mocked Codex transport. It covers blank proposals, multi-direction
-feedback, preservation/undo, changed-favorite planning, immutable selection, delayed
-imports, permissions, account isolation, partial native success, explicit retry,
-pre-submission and in-flight cancellation, restart recovery, and the community API
-capability boundary. Existing server tests are also run.
-
-These checks do not demonstrate that generated characters are visually desirable,
-that a live provider completed the new batch workflow, or that a person can finish
-the addendum's journey in the browser. Earlier live integration checks predate this
-workflow and are not acceptance evidence for this change.
-
-## Remaining required work
-
-- Connect a consistent Korean, image-first default workspace to these APIs; provide
-  onboarding, contextual comparison, saved directions, visible preserve/vary scopes,
-  finite generation consent/progress/cancel/retry, and chosen-design recovery.
-- Add multi-image upload and thumbnail matching, with a direct way to begin a round
-  from independent inspirations. Storing inspiration alone does not satisfy UX-01/02.
-- Finish contextual view/correction behavior, including faithful-but-unwanted shapes,
-  reference choice for drift correction, ambiguous hidden structure, and actionable
-  UI recovery after bounded correction attempts.
-- Preserve access to advanced editing, evidence review, authentication/settings,
-  usage controls, and handoff while removing numbered mandatory navigation from
-  the default discovery experience.
-- Verify keyboard/touch/enlargement focus return, stable slots, reload recovery,
-  desktop 1440×900 and narrow 390×844 layouts, and populated-project migration.
-- Complete and report A01–A22 acceptance walkthroughs, including the requested
-  acquisition demonstration in each mode. Distinguish mock workflow checks from
-  live provider results and subjective visual quality.
-
-Do not describe the usability addendum as implemented until those steps pass.
+Verification: 78 Python tests, 13 Chromium browser tests, production build, Ruff
+and whitespace checks pass. Two real native batches (four successful images total) and an actual-file
+community round trip are recorded separately from mocked failure/cancellation
+checks. The user explicitly authorized the two test reference images and ongoing
+permission for such generated test references. Final choice persistence was also
+verified on an isolated copy while the user explored the original project.

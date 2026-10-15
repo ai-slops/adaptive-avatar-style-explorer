@@ -1,4 +1,4 @@
-# Acceptance audit — open
+# Original v2 acceptance audit — open
 
 Source: `specs/implementation-v2.md` was byte-for-byte compared with the user's
 `.local/adaptive-avatar-style-explorer-implementation-spec.v2.en.md` on 2026-10-15.
@@ -7,6 +7,13 @@ changes execution and live integration gates; [browser access](browser-access.md
 records the requested remembered-browser behavior. Other design/evidence/learning
 requirements remain in scope.
 
+The later [discovery-first usability addendum](usability-addendum.md) supersedes the
+default navigation and verification-first priority in this original audit.
+[Its separate A01–A22 record](usability-acceptance.md) verifies the implemented
+feedback-to-next-round journey, contextual correction budget and provisional
+selection. Rows below describe the broader original v2 scope; they are not a claim
+that the new default discovery workflow remains absent.
+
 This is a working gap audit, not proof of complete MVP delivery. Passing numerical,
 service and browser tests does not prove real visual extraction or preference quality.
 
@@ -14,7 +21,7 @@ service and browser tests does not prove real visual extraction or preference qu
 |---|---|---|
 | §§1–2: reusable-avatar objective; intent, presentation, observations and suitability separate | Strict canonical/observation contracts, fixed reference feature schema, evidence policy; domain and learning tests | Implemented for tested cases; real image-confounding accuracy is not established |
 | §3: provider and billing boundaries | Native Codex account/catalog/image/vision jobs verified live; community SIWC adapter signed-token mocks; server-selected route isolation | Native installation gate verified; live SIWC remains unverified for optional compatibility mode |
-| §4: no-questionnaire onboarding, six-version board, scoped synchronized comparison, inspection, prompt and handoff screens | Chromium workflow tests; React screens; `test_multiple_depictions_one_candidate` | Core loop implemented; deterministic next actions are not yet presented in the UI |
+| §4: no-questionnaire onboarding, six-version board, scoped synchronized comparison, inspection, prompt and handoff screens | Chromium workflow tests; React screens; `test_multiple_depictions_one_candidate` | The default workflow is superseded by the implemented discovery journey and next-round UI; see the separate usability acceptance record |
 | §4.4, §8.2: explicit choices only; neither/skip/tie, shortlist and depiction rejection semantics | Frozen reviews and `test_neither_skip_tie_undo_and_idempotency`; no navigation-to-feedback handlers | Tested at service level and scoped browser comparison |
 | §5: immutable canonical records and deliberate adoption | Version/change-set service; canonical editor browser workflow; typed property/source/relationship ZIP test | Typed values, metadata, relation states and exact sources survive deliberate revision; old version remains unchanged |
 | §5.3–5.4: confirmed intent is distinct from image compatibility | Independent property states, user locks, append-only links/observations | Tested; historical decision-source exports do not count as revised-version evidence |
@@ -23,7 +30,7 @@ service and browser tests does not prove real visual extraction or preference qu
 | §8: exact history, frozen evidence, idempotency, compensation, forks and locks | Domain tests for correction invalidation, boundaries, undo, repeated weight, inherited locks | Branch source ancestry is preserved; explicit unlock now traverses branch-adoption ancestry without changing parent history |
 | §9.1–9.7 and Appendices B–C: fixed masked numerical baseline and scoped ranking | Reference/policy/ranking modules and numerical/domain tests | Implemented baseline; numerical passing results do not establish perceptual invariance |
 | §9.8: inspectable preference hypotheses with supporting/contradicting IDs and user confirmation | No hypothesis store or user confirmation workflow found | **Missing**; qualitative evidence must remain distinct from observations and numerical models |
-| §10: action-type policy, informative comparison, failure budgets, adaptive evidence priority and checkpoint recommendation | Basic `Planning.next_actions`; ranker informative pairs | **Partial**; deterministic next-action UI, issue-class routing, bounded correction history and richer acquisition policy need work |
+| §10: action-type policy, informative comparison, failure budgets, adaptive evidence priority and checkpoint recommendation | Basic `Planning.next_actions`; ranker informative pairs | Discovery next-round UI, contextual issue routing and bounded correction are now exercised in the usability acceptance record; richer strict-evidence scheduling and empirical acquisition evaluation remain separate |
 | §11: compiler preserves exact target/hash, attachment roles and allowed changes | Compiler/API tests and browser prompt workflow | Core compiler verified; review batch limits/immutable prompt revision behavior in full scenario |
 | §11.1: reasoning context includes actual observations | `Jobs.context` includes selected current links' reviewed observations, assessment, actual presentation and schema/extractor/observation IDs; `test_reasoning_context.py` checks intent separation, selected-only scope, ownership and superseded-link rejection | Gap fixed and service-tested; no extra live provider transmission was performed for this change |
 | §12: architecture and server-owned execution context | FastAPI services, SQLite, narrow providers, React UI; ownership and mode tests | Implemented architecture; suggested directory layout is not itself a requirement |

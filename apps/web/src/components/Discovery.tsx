@@ -770,7 +770,12 @@ export function Discovery({
                         ) : (
                           <span className="match-number">{c.position + 1}</span>
                         )}
-                        <span>{c.label}</span>
+                        <span>
+                          {c.label}
+                          {!c.image && c.referenceImages[0] && (
+                            <small>출발점 참고 이미지 · 새 결과 아님</small>
+                          )}
+                        </span>
                       </label>
                     ))}
                     <label className="discovery-match">

@@ -35,8 +35,7 @@ installation was present at initialization. This is a fresh-install implementati
   remain unverified.
 
 The [open acceptance audit](ACCEPTANCE.md) records remaining functional and
-verification gaps. In particular, hypothesis management, the complete next-action
-workflow, the full manual scenario, legacy migration and empirical preference evaluation are not proven complete.
+verification gaps. The usability acceptance record separately verifies the new discovery continuation. Original preference-hypothesis management, the full original modeling scenario, semantic legacy-v1 migration and empirical preference evaluation remain unproven.
 
 Canonical editing now supports typed values, provenance, notes, attachment/layer
 relationships and multi-line unresolved decisions. Historical canonical decision
@@ -49,20 +48,31 @@ assessment scope, observed presentation, observation IDs and schema/extractor
 versions. Canonical intent remains separate. Unselected images, superseded links
 and other owners' records are excluded; no geometric verification is implied.
 
+## Discovery-first addendum
+
+The [2026-10-15 usability addendum](usability-addendum.md) now supplies the default
+Korean journey. Blank-project and reference onboarding, provisional feedback,
+independent directions, meaningful next designs, contextual refinement/views,
+chosen snapshots, finite native rounds and prompt-only external returns are
+connected in one workspace. Advanced verification and handoff remain available.
+The [A01–A22 evidence](usability-acceptance.md) supersedes earlier statements that
+the discovery continuation UI was missing. It does not close unrelated original
+v2 empirical, legacy-v1 or live-SIWC gaps.
+
 ## Current verification
 
-- 60 Python tests pass: domain/service transactions, reference numerical behavior,
+- 78 Python tests pass: domain/service transactions, reference numerical behavior,
   evidence policy, image validation, prompt compiler/export, checkpoints, and API
   authentication/CSRF/isolation/deletion; signed-token SIWC mock tests, two-account
   isolation, explicit offline binding, budgets, stale output, cancellation and recovery.
 - TypeScript check and Vite production build pass.
-- Five real Chromium end-to-end tests pass through project/design creation,
+- Thirteen Chromium end-to-end tests pass: eight new discovery workflows plus five retained workflows through project/design creation,
   image import/review, 25% structural coverage, prompt preparation, explicit gap
   acceptance, handoff ZIP download, mobile overflow, and a scoped visual comparison
   that updates only its regional preference model. The third checks native-mode
   connection, generation, unreviewed import and reload using an isolated fake worker.
-  The fourth covers initial browser pairing, remembered plain-URL access, the
-  remembering setting, explicit sign-out and revoked access. The fifth verifies
+  The fourth retained workflow covers initial browser pairing, remembered plain-URL access, the
+  remembering setting, explicit sign-out and revoked access. The fifth retained workflow verifies
   typed canonical values, component relationships, notes, source image/decision IDs,
   multi-line decisions, deliberate adoption and preservation of the old version.
 - Browser fixtures use synthetic raster bytes to test workflow. They do not prove
@@ -98,6 +108,13 @@ expiry, revocation, runtime mode isolation, and zero restored provider budgets.
   Initial response-schema failures were fixed and retained as failed jobs; each
   verification attempt was explicitly issued, with no automatic retry. The successful
   result remains unconfirmed suggestions and adds no observations or design changes.
+
+The discovery addendum was also exercised live through two explicit two-turn
+batches, with separate user approval for the generated test references in the
+second batch. Four images returned to their original candidate slots as
+unreviewed depictions. A prompt-only external return used those actual PNG files
+without any provider request in that mode. See the [usability acceptance record](usability-acceptance.md)
+for the exact workflow and isolated-copy final-choice verification.
 
 The local Codex generation acceptance gate is satisfied. A live SIWC callback is
 no longer a gate for this user-requested mode. SIWC distribution/two-user live

@@ -2269,3 +2269,8 @@ button[aria-pressed="true"] {
     height: 300px;
   }
 }
+.discovery-match > span > small {
+  display: block;
+  margin-top: 3px;
+  font-weight: 400;
+}
