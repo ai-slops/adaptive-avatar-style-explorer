@@ -43,6 +43,15 @@ from .contracts import (
     Strict,
     VersionInput,
 )
+from .discovery import Discovery
+from .discovery_contracts import (
+    DiscoveryActiveRound,
+    DiscoveryGenerationInput,
+    DiscoveryImportInput,
+    DiscoveryLibraryInput,
+    DiscoveryReactionInput,
+    DiscoveryRoundInput,
+)
 from .evaluation import Evaluation
 from .exports import Exports
 from .jobs import Jobs
@@ -114,9 +123,12 @@ def create_app(
         else None
     )
 
+    discovery = Discovery(service, assets, planning, native)
+
     @asynccontextmanager
     async def lifespan(app):
         yield
+        await discovery.close()
         if native:
             await native.close()
         await jobs.close()
@@ -136,6 +148,7 @@ def create_app(
     app.state.provider = provider
     app.state.jobs = jobs
     app.state.codex_jobs = native
+    app.state.discovery = discovery
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
@@ -372,6 +385,16 @@ def create_app(
             else {"remoteRevocationConfirmed": False}
         )
         if native:
+            for project_row in service.projects(request.state.principal):
+                for batch in discovery.state(
+                    request.state.principal, project_row["project_id"]
+                )["batches"]:
+                    if batch["state"] in ("queued", "running"):
+                        discovery.cancel(
+                            request.state.principal,
+                            project_row["project_id"],
+                            batch["batchId"],
+                        )
             for task in list(native.tasks.values()):
                 task.cancel()
         sessions.pop(session_id, None)
@@ -515,6 +538,60 @@ def create_app(
     @app.post("/api/projects")
     def create_project(request: Request, data: ProjectInput):
         return service.create_project(request.state.principal, data.title)
+
+    @app.get("/api/projects/{p}/discovery")
+    def discovery_state(p: str, request: Request):
+        return discovery.state(request.state.principal, p)
+
+    @app.post("/api/projects/{p}/discovery/rounds")
+    def discovery_prepare(p: str, data: DiscoveryRoundInput, request: Request):
+        return {"roundId": discovery.prepare(request.state.principal, p, data)}
+
+    @app.post("/api/projects/{p}/discovery/reactions")
+    def discovery_react(p: str, data: DiscoveryReactionInput, request: Request):
+        return discovery.react(request.state.principal, p, data)
+
+    @app.post("/api/projects/{p}/discovery/active-round")
+    def discovery_activate(p: str, data: DiscoveryActiveRound, request: Request):
+        discovery.activate(request.state.principal, p, data.roundId)
+        return {"activeRoundId": data.roundId}
+
+    @app.post("/api/projects/{p}/discovery/library")
+    def discovery_library(p: str, data: DiscoveryLibraryInput, request: Request):
+        return {"roundId": discovery.use_library(request.state.principal, p, data)}
+
+    @app.post("/api/projects/{p}/discovery/imports")
+    def discovery_import(p: str, data: DiscoveryImportInput, request: Request):
+        return discovery.import_results(request.state.principal, p, data)
+
+    @app.post("/api/projects/{p}/discovery/rounds/{r}/export")
+    def discovery_export(p: str, r: str, request: Request):
+        return Response(
+            discovery.round_pack(request.state.principal, p, r),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="discovery-prompts.zip"'
+            },
+        )
+
+    if native:
+
+        @app.post("/api/projects/{p}/discovery/rounds/{r}/generate")
+        async def discovery_generate(
+            p: str, r: str, data: DiscoveryGenerationInput, request: Request
+        ):
+            require(
+                request.state.principal == principal,
+                "Local installation owner required",
+                403,
+            )
+            return {
+                "batchId": await discovery.generate(request.state.principal, p, r, data)
+            }
+
+        @app.post("/api/projects/{p}/discovery/batches/{b}/cancel")
+        async def discovery_cancel(p: str, b: str, request: Request):
+            return discovery.cancel(request.state.principal, p, b)
 
     @app.get("/api/projects/{p}/branches")
     def branches(p: str, request: Request):
@@ -783,6 +860,9 @@ def create_app(
             ]
         for job_id in active_jobs:
             jobs.cancel(request.state.principal, p, job_id)
+        for batch in discovery.state(request.state.principal, p)["batches"]:
+            if batch["state"] in ("queued", "running"):
+                discovery.cancel(request.state.principal, p, batch["batchId"])
         if native:
             for item in native.list(request.state.principal, p):
                 if item["state"] in ("queued", "running"):
